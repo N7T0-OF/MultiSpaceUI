@@ -1,0 +1,77 @@
+plugins {
+    id 'net.fabricmc.fabric-loom' version "${loom_version}"
+    id 'java'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+    withSourcesJar()
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Minecraft 26.3 ships unobfuscated: no mappings, no remapping. The new
+    // net.fabricmc.fabric-loom plugin does not remap Minecraft or mods, so plain
+    // `implementation` replaces `modImplementation` and `jar` replaces `remapJar`.
+    minecraft 'com.mojang:minecraft:' + project.minecraft_version
+    implementation 'net.fabricmc:fabric-loader:' + project.loader_version
+    implementation 'net.fabricmc.fabric-api:fabric-api:' + project.fabric_version
+
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+processResources {
+    inputs.property 'version', project.version
+
+    filesMatching('fabric.mod.json') {
+        expand 'version': project.version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = 'UTF-8'
+    // Bytecode 21 keeps the Mixin compatibility level simple; the game and loader
+    // require a Java 25 runtime regardless (declared in fabric.mod.json).
+    it.options.release = 21
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+    }
+}
+
+// Every successful build drops the playable JAR into copy-jar-here/ using a name
+// that encodes the Minecraft version, so several builds can coexist.
+jar {
+    from("LICENSE") {
+        rename { "${it}_${project.base.archivesName.get()}" }
+    }
+    archiveFileName = "${project.base.archivesName.get()}-mc${project.minecraft_version}-v${project.version}.jar"
+}
+
+tasks.register('copyJarToDelivery', Copy) {
+    dependsOn tasks.named('jar')
+    from tasks.named('jar')
+    into layout.projectDirectory.dir('copy-jar-here')
+    // The file name already contains the Minecraft and mod version, so a rebuild of
+    // the same version updates its own JAR and never clobbers another version.
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+}
+
+build.dependsOn tasks.named('copyJarToDelivery')

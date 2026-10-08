@@ -1,0 +1,25 @@
+# Gradle / build
+.gradle/
+build/
+out/
+
+# Runtime data (world saves, logs, options, crash reports)
+run/
+
+# Delivered binaries: the JAR is a build artefact, published via GitHub Releases
+copy-jar-here/
+
+# Third-party reference material kept locally for analysis only.
+# Windowed-GUIs is under a proprietary licence (no redistribution), and
+# Spatial-GUI is MIT: neither belongs in this repository.
+exemple/
+
+# Local tooling / personal files
+.idea/
+.vscode/
+*.iml
+.classpath
+.project
+.settings/
+pormpt.txt
+Capture d'écran*.png

@@ -1,0 +1,8 @@
+{
+  "key.multispaceui.toggle": "Toggle MultiSpaceUI",
+  "key.multispaceui.next_window": "Focus next window",
+  "key.multispaceui.close_window": "Close active window",
+  "key.categories.multispaceui": "MultiSpaceUI",
+  "text.multispaceui.settings": "MultiSpaceUI Settings",
+  "text.multispaceui.taskbar.empty": "No windows open"
+}

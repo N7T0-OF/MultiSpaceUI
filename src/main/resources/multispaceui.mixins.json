@@ -1,0 +1,21 @@
+{
+  "required": true,
+  "package": "dev.multispaceui.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "client": [
+    "gui.AbstractContainerScreenAccessor",
+    "gui.GuiMixin",
+    "gui.GuiRendererAccessor",
+    "gui.GuiRendererMixin",
+    "gui.MouseHandlerMixin",
+    "gui.WindowMixin",
+    "render.GameRendererAccessor",
+    "render.GameRendererMixin",
+    "render.LevelRendererMixin"
+  ],
+  "mixins": [],
+  "server": []
+}

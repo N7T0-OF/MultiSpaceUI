@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "multispaceui",
+  "version": "${version}",
+  "name": "MultiSpaceUI",
+  "description": "Floating spatial windows for Minecraft: container screens become 3D panels in the world. The panel you look at stays sharp and large, the others shrink and fade with distance.",
+  "authors": [
+    "MultiSpaceUI contributors"
+  ],
+  "license": "MIT",
+  "icon": "assets/multispaceui/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "dev.multispaceui.MultiSpaceUI"
+    ],
+    "client": [
+      "dev.multispaceui.client.MultiSpaceUIClient"
+    ]
+  },
+  "mixins": [
+    "multispaceui.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~26.3",
+    "java": ">=25",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "modmenu": "*"
+  }
+}
