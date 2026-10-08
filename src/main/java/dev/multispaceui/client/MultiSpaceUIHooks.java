@@ -30,13 +30,17 @@ final class MultiSpaceUIHooks {
         });
 
         // Leaving a world must not carry panels, captures or windows over.
+        // The event fires on the network thread, while tearing windows down touches menus
+        // and GPU resources: the work is handed to the client thread first.
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
-            try {
-                WindowManager.get().dropAllWindows();
-                SpatialWindowRenderer.instance.onDisconnect();
-            } catch (Throwable t) {
-                MultiSpaceUI.LOGGER.debug("Disconnect cleanup failed", t);
-            }
+            client.execute(() -> {
+                try {
+                    WindowManager.get().dropAllWindows();
+                    SpatialWindowRenderer.instance.onDisconnect();
+                } catch (Throwable t) {
+                    MultiSpaceUI.LOGGER.debug("Disconnect cleanup failed", t);
+                }
+            });
         });
 
         MultiSpaceUI.LOGGER.info("MultiSpaceUI client initialized");

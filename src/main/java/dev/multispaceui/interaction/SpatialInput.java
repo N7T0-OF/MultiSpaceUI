@@ -123,9 +123,20 @@ public final class SpatialInput {
         return hitOf(active) == null;
     }
 
+    /**
+     * Button value of the left mouse button.
+     *
+     * <p>Minecraft 26.3 numbers its mouse buttons the way SDL does, so the left button is
+     * {@code 1} (middle {@code 2}, right {@code 3}) rather than the old GLFW numbering where
+     * the left button is {@code 0}. Every input path of that version agrees on it:
+     * {@code MouseHandler} sets {@code isLeftPressed} for 1, the container screens treat 1 and
+     * 3 as the buttons that interact with a slot, and {@code key.use} is bound to 3.</p>
+     */
+    public static final int LEFT_BUTTON = 1;
+
     /** Called at the head of every mouse button event: focus the window that was hit. */
     public static void onButton(int button, int action) {
-        if (action != 1 || button != 0 || !MultiSpaceUI.isEnabled()) {
+        if (action != 1 || button != LEFT_BUTTON || !MultiSpaceUI.isEnabled()) {
             return;
         }
         try {

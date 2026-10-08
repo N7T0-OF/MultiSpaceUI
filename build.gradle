@@ -56,6 +56,19 @@ test {
     }
 }
 
+// End-to-end validation: `gradlew runClientGameTest` boots a client with
+// -Dfabric.client.gametest in its own run directory (build/run/clientGameTest) and runs the
+// entrypoint declared under "fabric-client-gametest" in fabric.mod.json.
+fabricApi {
+    configureTests {
+        enableClientGameTests.set(true)
+        // The mod only ships client game tests; the server harness has nothing to run.
+        enableGameTests.set(false)
+        // The test lives in src/main/java, no extra source set is needed.
+        createSourceSet.set(false)
+    }
+}
+
 // Every successful build drops the playable JAR into copy-jar-here/ using a name
 // that encodes the Minecraft version, so several builds can coexist.
 jar {

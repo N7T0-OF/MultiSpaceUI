@@ -12,6 +12,11 @@ import dev.multispaceui.window.SpatialWindow;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.render.GuiRenderer;
+import net.minecraft.client.gui.render.pip.GuiBannerResultRenderer;
+import net.minecraft.client.gui.render.pip.GuiBookModelRenderer;
+import net.minecraft.client.gui.render.pip.GuiEntityRenderer;
+import net.minecraft.client.gui.render.pip.GuiProfilerChartRenderer;
+import net.minecraft.client.gui.render.pip.GuiSkinRenderer;
 import net.minecraft.client.gui.render.pip.PictureInPictureRenderer;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.state.WindowRenderState;
@@ -19,8 +24,10 @@ import net.minecraft.client.renderer.state.gui.GuiRenderState;
 import org.joml.Vector4f;
 
 import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Off-screen target one window is rendered into.
@@ -38,10 +45,12 @@ public final class WindowCapture implements AutoCloseable {
     /** Which off-screen target each private {@link GuiRenderer} draws into. */
     private static final Map<GuiRenderer, TextureTarget> TARGETS = new IdentityHashMap<>();
 
-    private static List<PictureInPictureRenderer<?>> vanillaPipRenderers;
+    /** Picture-in-picture renderers of the game's own renderer, only kept as a last resort. */
+    private static List<PictureInPictureRenderer<?>> gamePipRenderers;
 
     private final GuiRenderState renderState = new GuiRenderState();
     private GuiRenderer guiRenderer;
+    private boolean borrowedPipRenderers;
     private TextureTarget target;
     private int targetWidth;
     private int targetHeight;
@@ -52,26 +61,60 @@ public final class WindowCapture implements AutoCloseable {
         return renderer == null ? null : TARGETS.get(renderer);
     }
 
-    private static List<PictureInPictureRenderer<?>> pipRenderers(Minecraft mc) {
-        if (vanillaPipRenderers != null) {
-            return vanillaPipRenderers;
+    /** True once the screen has been extracted into this capture at least once. */
+    public boolean hasTarget() {
+        return target != null;
+    }
+
+    private static List<PictureInPictureRenderer<?>> gamePipRenderers(Minecraft mc) {
+        if (gamePipRenderers != null) {
+            return gamePipRenderers;
         }
         try {
             GuiRenderer main = ((GameRendererAccessor) mc.gameRenderer).multispaceui$getGuiRenderer();
-            vanillaPipRenderers = List.copyOf(
+            gamePipRenderers = List.copyOf(
                     ((GuiRendererAccessor) main).multispaceui$getPictureInPictureRenderers().values());
         } catch (Throwable t) {
-            MultiSpaceUI.LOGGER.debug("Could not borrow the vanilla picture-in-picture renderers", t);
-            vanillaPipRenderers = List.of();
+            MultiSpaceUI.LOGGER.debug("Could not read the picture-in-picture renderers of the game", t);
+            gamePipRenderers = List.of();
         }
-        return vanillaPipRenderers;
+        return gamePipRenderers;
+    }
+
+    /**
+     * The picture-in-picture renderers, built for this window alone.
+     *
+     * <p>They hold the texture a preview (player entity, skin, book, banner, profiler chart) is
+     * rendered into. That texture is closed together with the renderer they belong to, so a
+     * window may never borrow the ones of the game: closing a single window would then destroy
+     * the previews of the HUD and of every other window, and every later capture would fail
+     * with "Color texture is closed".</p>
+     */
+    private static List<PictureInPictureRenderer<?>> ownPipRenderers(Minecraft mc) {
+        return List.of(
+                new GuiEntityRenderer(mc.getEntityRenderDispatcher()),
+                new GuiSkinRenderer(),
+                new GuiBookModelRenderer(),
+                new GuiBannerResultRenderer(mc.getAtlasManager()),
+                new GuiProfilerChartRenderer());
     }
 
     private void ensureRenderer(Minecraft mc) {
         if (guiRenderer != null) {
             return;
         }
-        guiRenderer = new GuiRenderer(renderState, mc.gameRenderer.featureRenderDispatcher(), pipRenderers(mc));
+        List<PictureInPictureRenderer<?>> pip;
+        try {
+            pip = ownPipRenderers(mc);
+            borrowedPipRenderers = false;
+        } catch (Throwable t) {
+            // The renderer list of this Minecraft version changed: fall back to sharing so that
+            // screens with a preview keep rendering instead of failing outright.
+            MultiSpaceUI.LOGGER.warn("Could not create private picture-in-picture renderers", t);
+            pip = gamePipRenderers(mc);
+            borrowedPipRenderers = true;
+        }
+        guiRenderer = new GuiRenderer(renderState, mc.gameRenderer.featureRenderDispatcher(), pip);
     }
 
     /**
@@ -147,10 +190,30 @@ public final class WindowCapture implements AutoCloseable {
             }
             guiRenderer.render();
             guiRenderer.endFrame();
+        } catch (Throwable t) {
+            diagnose(t, window);
         } finally {
             state.width = previousWidth;
             state.height = previousHeight;
         }
+    }
+
+    private int failures;
+
+    /**
+     * Keeps the frame alive while a capture fails, so that one broken window cannot blank every
+     * other one: the panels keep their last texture and the failure is reported once.
+     */
+    private void diagnose(Throwable t, SpatialWindow window) {
+        if (failures++ > 3) {
+            return;
+        }
+        Set<String> states = new LinkedHashSet<>();
+        renderState.forEachPictureInPicture(s -> states.add(s.getClass().getSimpleName()));
+        MultiSpaceUI.LOGGER.error(
+                "Could not render the content of {}: target={}x{} window={}x{} previews={}, giving up for now",
+                window.screen().getClass().getSimpleName(), targetWidth, targetHeight,
+                window.innerWidth(), window.innerHeight(), states, t);
     }
 
     private void clearTarget() {
@@ -177,6 +240,11 @@ public final class WindowCapture implements AutoCloseable {
         MultiSpaceLayout.popAll();
         if (guiRenderer != null) {
             TARGETS.remove(guiRenderer);
+            if (borrowedPipRenderers) {
+                // These renderers belong to the game and to the other windows: handing them to
+                // GuiRenderer.close() would destroy textures everybody still uses.
+                ((GuiRendererAccessor) guiRenderer).multispaceui$getPictureInPictureRenderers().clear();
+            }
             try {
                 guiRenderer.close();
             } catch (Exception e) {

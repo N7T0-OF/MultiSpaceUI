@@ -105,11 +105,11 @@ change, no value produces a jump on screen.
 
 | Key | Default | Meaning |
 | --- | ------- | ------- |
-| `panelDistance` | `1.6` | Distance from the camera. |
+| `panelDistance` | `1.6` | How far a panel is placed in front of its anchor (the eye while the panels follow the player). |
 | `panelWidth` | `1.25` | Panel width in blocks at full scale; height follows the window aspect ratio. |
 | `panelSideOffset`, `panelHeightOffset` | `0.0` | Translation of the whole layout. |
 | `panelYawOffset`, `panelPitchOffset` | `0.0` | Rotation of the whole layout. |
-| `panelsFollowPlayer` | `true` | `false` = panels stay anchored in the world where they opened. |
+| `panelsFollowPlayer` | `true` | `false` = panels stay anchored in the world where they opened; the distance fade then follows how far the player walks away from them. |
 | `windowSpacingDegrees` | `18` | Angular spacing between two windows of the fan. |
 | `backgroundPushBack` | `0.35` | Extra depth for non-focused windows. |
 | `resizeEnabled` | `true` | Drag panel edges to resize. |
@@ -126,7 +126,7 @@ change, no value produces a jump on screen.
 
 | Key | Default | Meaning |
 | --- | ------- | ------- |
-| `maxDistance` | `6.0` | Beyond this distance a window is invisible and inert. |
+| `maxDistance` | `6.0` | Beyond this distance a window is invisible and inert — except the one being looked at: focus wins over distance. |
 | `focusScaleIntensity` | `0.75` | How much a non-focused window shrinks (`0` = none, `1` = down to `minScale`). |
 | `focusFadeIntensity` | `0.85` | How much a non-focused window fades. |
 | `crosshairBoost` | `1.0` | Extra priority for the window targeted by the crosshair. |
@@ -186,40 +186,55 @@ One frame, three capture points — no GUI is extracted twice:
 | `MultiSpaceConfig` | Persistent client config. |
 | `ScreenCompatibility` | White-list / black-list evaluation. |
 
-## Building
+## Building and testing
 
 Requires **JDK 25** (`JAVA_HOME` must point to it).
 
 ```bash
-./gradlew build        # builds, then copies the JAR into copy-jar-here/
-./gradlew runClient    # launches a development client
+./gradlew build              # builds, then copies the JAR into copy-jar-here/
+./gradlew runClient          # launches a development client
+./gradlew test               # 24 JUnit tests: geometry, visibility, configuration
+./gradlew runClientGameTest  # 47 end-to-end checks inside a real, interactive client
 ```
 
 The delivered JAR is `copy-jar-here/multispaceui-mc<mc-version>-v<mod-version>.jar`.
 Rebuilding the same version overwrites its own JAR and never clobbers another version.
 
+The game test drives real input (pointer, mouse buttons, scroll wheel, key bindings) in a
+live world: it opens the inventory, points at a slot, clicks it, clicks outside every panel,
+opens a chest as a second window, walks away from both panels and finally binds the toggle
+key. Every check is logged as `[gametest] PASS ...` (or `FAIL ...`), the run ends with a
+single `AssertionError` listing every failure, and the screenshots it takes land in
+`build/run/clientGameTest/screenshots/`.
+
 ## Test matrix
 
 "Build passes" is not enough: the mod must be **playable**, with interactive 3D interfaces.
+**Last run: 47/47 game-test checks and 24/24 unit tests, both green.**
 
-| # | Test | Status |
-| - | ---- | ------ |
-| 1 | `gradlew build` succeeds on its own | ✅ pass |
-| 2 | JAR delivered in `copy-jar-here/` with MC + mod version in the name | ✅ pass |
-| 3 | Client boots with the mod, no Mixin apply error | ✅ pass |
-| 4 | HUD renders normally with the mod enabled | ✅ pass |
-| 5 | Container screen appears as a 3D panel, no dark backdrop left behind | ✅ pass |
-| 6 | Panel content is not mirrored / UV orientation correct | ✅ pass (visual) |
-| 7 | Vanilla hotbar stays drawn while a window is open | ✅ pass |
-| 8 | Click inside a panel reaches the right slot (item drag works) | ⏳ pending |
-| 9 | Click outside a panel never closes the container | ⏳ pending |
-| 10 | Scroll inside a panel | ⏳ pending |
-| 11 | Looking at a second window focuses and re-scales it | ⏳ pending |
-| 12 | Two windows open at once, background window persists | ⏳ pending |
-| 13 | Panel shrinks and fades with distance, gone past `maxDistance` | ⏳ pending |
-| 14 | Focused window is never hidden by the distance rule | ⏳ pending |
-| 15 | Toggle keybind disables the mod and folds all windows | ⏳ pending |
-| 16 | Config edits are applied and persisted across restarts | ⏳ pending |
+| # | Test | Result | Verified by |
+| - | ---- | ------ | ----------- |
+| 1 | `gradlew build` succeeds on its own | ✅ pass | `BUILD SUCCESSFUL` |
+| 2 | JAR delivered in `copy-jar-here/` with MC + mod version in the name | ✅ pass | `multispaceui-mc26.3-v0.1.0.jar` |
+| 3 | Client boots with the mod, no Mixin apply error | ✅ pass | the game test boots and drives a real client for the whole run |
+| 4 | HUD renders normally with the mod enabled | ✅ pass | screenshot `0000_multispaceui-01-inventory-window.png` |
+| 5 | Container screen appears as a 3D panel, no dark backdrop left behind | ✅ pass | `the panel is placed in view space`, `the panel content is extracted into its own texture` |
+| 6 | Panel content is not mirrored / UV orientation correct | ✅ pass | `the pointer maps onto the slot inside the panel (panel 16,150 / slot 16,150)` + screenshot |
+| 7 | Vanilla hotbar stays drawn while a window is open | ✅ pass | screenshot `0000_...` (hotbar, health and XP still drawn) |
+| 8 | Click inside a panel reaches the right slot (item drag works) | ✅ pass | `a click inside the panel is routed to the screen`, `clicking the slot picks the stack up` |
+| 9 | Click outside a panel never closes the container | ✅ pass | `a click far outside every panel is dropped`, `the very same container screen survives a click outside the panel`, `the click outside neither picked up nor dropped anything` |
+| 10 | Scroll inside a panel | ✅ pass | `scroll inside the panel is routed to the screen`, `scroll far outside every panel is dropped as well` |
+| 11 | Looking at a second window focuses and re-scales it | ✅ pass | `the crosshair focuses the new window`, `the background window loses the focus`, `smaller than the focused one (0.35 < 1.0)` |
+| 12 | Two windows open at once, background window persists | ✅ pass | `using the chest opens a second window`, `the background window is still visible`, screenshot `0003_multispaceui-04-two-windows.png` |
+| 13 | Panel shrinks and fades with distance, gone past `maxDistance` | ✅ pass | `past maxDistance is gone / fades out / shrinks to its minimum` (panels anchored in the world, player moved 14 blocks away) |
+| 14 | Focused window is never hidden by the distance rule | ✅ pass | `the window being looked at is never hidden by the distance rule` + unit test `focusedWindowIsNeverHiddenByTheDistanceRule` |
+| 15 | Toggle keybind disables the mod and folds all windows | ✅ pass | `the toggle keybind switches the mod off`, `switching the mod off folds every window` |
+| 16 | Config edits are applied and persisted across restarts | ✅ pass | `a configuration edit is written to disk and read back` + 7 unit tests on `MultiSpaceConfig` |
+
+Test #10 notes: `mouseScrolled` is routed through the same drop predicate as `mouseClicked`,
+and the game test exercises both sides of it (over a panel → the screen receives the scroll,
+outside every panel → dropped). No vanilla container screen scrolls its own content, so only
+the routing is observable — there was no scrollable widget to watch end to end.
 
 ## Compatibility with future versions
 

@@ -99,9 +99,11 @@ public final class WindowManager {
      */
     public void onScreenReplaced(Screen newScreen) {
         if (newScreen == null) {
-            if (!installedAsScreen) {
-                dropAllWindows();
-            }
+            // The workspace screen simply closed. The windows stay alive in the background and
+            // the player gets them back by opening a container again. Only a *different* screen
+            // (chat, pause, death, title...) leaves the workspace and folds them below. This
+            // must not depend on the screen that was displayed: Minecraft calls setScreen(null)
+            // several times in a row, and the repeats would otherwise close everything.
             installedAsScreen = false;
             return;
         }
@@ -114,6 +116,8 @@ public final class WindowManager {
         installedAsScreen = false;
         if (!ScreenCompatibility.isWindowable(newScreen)) {
             // The player left the window workspace (chat, pause, death...): fold everything.
+            MultiSpaceUI.LOGGER.debug("Folding every window: {} is not a windowed screen",
+                    newScreen.getClass().getSimpleName());
             dropAllWindows();
         }
     }

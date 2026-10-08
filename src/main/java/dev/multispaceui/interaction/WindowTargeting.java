@@ -8,6 +8,7 @@ import dev.multispaceui.window.SpatialWindow;
 import net.minecraft.client.Minecraft;
 import org.joml.Matrix4fc;
 import org.joml.Vector3f;
+import org.joml.Vector3fc;
 
 import java.util.List;
 import java.util.Map;
@@ -101,9 +102,21 @@ public final class WindowTargeting {
         hasCursor = !Double.isNaN(cursorX) && !Double.isNaN(cursorY);
     }
 
-    /** Nearest window hit by {@code ray}, or null. */
+    /** Nearest window in the direction of {@code ray}, or null.
+     *
+     * <p>Several panels of the fan overlap, so a single ray often hits more than one of them.
+     * The window the player is really looking at is the one whose centre the ray points at
+     * most directly. Comparing depths instead would be self-defeating: only the focused window
+     * is kept at the front, so it would stay in front for ever and shadow the window that just
+     * became active. Depth only breaks a perfect tie.</p>
+     */
     private SpatialWindow pick(List<SpatialWindow> windows, Map<SpatialWindow, QuadBasis> bases, Vector3f ray) {
+        float rayLength = ray.length();
+        if (rayLength < 1.0E-6f) {
+            return null;
+        }
         SpatialWindow best = null;
+        float bestAlignment = Float.NEGATIVE_INFINITY;
         float bestDepth = Float.MAX_VALUE;
         for (SpatialWindow window : windows) {
             if (!window.isVisible() || window.isMinimized() || window.isClosing()) {
@@ -114,10 +127,20 @@ public final class WindowTargeting {
             if (hit == null) {
                 continue;
             }
+            Vector3fc center = basis.center();
+            float centerLength = center.length();
+            if (centerLength < 1.0E-4f) {
+                continue;
+            }
+            float alignment = (ray.x() * center.x() + ray.y() * center.y() + ray.z() * center.z())
+                    / (rayLength * centerLength);
             float depth = PanelGeometry.viewDepth(basis);
-            if (depth < bestDepth) {
-                bestDepth = depth;
+            if (best == null
+                    || alignment > bestAlignment + 1.0E-5f
+                    || (alignment >= bestAlignment - 1.0E-5f && depth < bestDepth)) {
                 best = window;
+                bestAlignment = alignment;
+                bestDepth = depth;
             }
         }
         return best;

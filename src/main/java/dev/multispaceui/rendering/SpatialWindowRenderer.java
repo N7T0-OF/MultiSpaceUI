@@ -87,6 +87,8 @@ public final class SpatialWindowRenderer {
     private int frameWidth;
     private int frameHeight;
     private boolean hasFrame;
+    /** Set when {@link #reset()} was called off the render thread. */
+    private volatile boolean pendingReset;
     private long lastFrameNanos = System.nanoTime();
 
     public WindowTargeting targeting() {
@@ -136,16 +138,50 @@ public final class SpatialWindowRenderer {
         return projectionMatrix;
     }
 
+    /** Size of the frame the panels were placed in, in framebuffer pixels. */
+    public int frameWidth() {
+        return frameWidth;
+    }
+
+    public int frameHeight() {
+        return frameHeight;
+    }
+
+    /** Placement of a panel in view space, or {@code null} while it is not placed yet. */
+    public QuadBasis basisOf(SpatialWindow window) {
+        return bases.get(window);
+    }
+
+    /** True once the screen of this window has been extracted into its own texture. */
+    public boolean hasCaptureContent(SpatialWindow window) {
+        WindowCapture capture = captures.get(window);
+        return capture != null && capture.hasTarget();
+    }
+
     public Matrix4fc viewRotation() {
         return viewRotation;
     }
 
+    /**
+     * Releases every capture. Off the render thread the request is only remembered:
+     * textures and buffers may not be destroyed from a network or server thread.
+     */
     public void reset() {
+        if (!RenderSystem.isOnRenderThread()) {
+            pendingReset = true;
+            return;
+        }
+        pendingReset = false;
+        resetNow();
+    }
+
+    private void resetNow() {
         for (WindowCapture capture : captures.values()) {
             capture.close();
         }
         captures.clear();
         bases.clear();
+        poses.clear();
         hasFrame = false;
         projectionSlice = null;
     }
@@ -155,12 +191,21 @@ public final class SpatialWindowRenderer {
         reset();
     }
 
+    /** Runs a reset that was requested from another thread. Safe to call every frame. */
+    public void applyPendingReset() {
+        if (pendingReset && RenderSystem.isOnRenderThread()) {
+            pendingReset = false;
+            resetNow();
+        }
+    }
+
     // ----------------------------------------------------------------------------------
     // Frame
     // ----------------------------------------------------------------------------------
 
     /** Full frame: targeting, presentation, capture and draw. */
     public void renderFrame(float partialTick) {
+        applyPendingReset();
         Minecraft mc = Minecraft.getInstance();
         MultiSpaceConfig cfg = MultiSpaceConfig.get();
         WindowManager manager = WindowManager.get();
@@ -184,9 +229,14 @@ public final class SpatialWindowRenderer {
             float focusWeight = WindowVisibilityController.focusWeight(window, focused, hovered, manager.active());
             float placed = cfg.panelDistance + window.distanceOffset()
                     + (focusWeight >= 0.999f ? 0.0f : cfg.backgroundPushBack);
+            // The falloff reacts to where the panel really is: the same as `placed` while the
+            // panels follow the player, and to how far the player walked away once a panel is
+            // anchored in the world. The placement target stays `placed`, so the measurement
+            // can never feed back into it.
+            float cameraDistance = cameraDistance(mc, window, placed);
             WindowVisibilityController.Presentation presentation =
-                    visibility.evaluate(window, focused, hovered, manager.active(), placed);
-            window.setTargets(presentation.scale(), presentation.opacity(), presentation.distance());
+                    visibility.evaluate(window, focused, hovered, manager.active(), cameraDistance);
+            window.setTargets(presentation.scale(), presentation.opacity(), placed);
             window.setVisible(presentation.visible());
             window.setInteractionEnabled(presentation.interactive());
             window.setFocused(window == focused);
@@ -240,6 +290,28 @@ public final class SpatialWindowRenderer {
     // ----------------------------------------------------------------------------------
     // Placement
     // ----------------------------------------------------------------------------------
+
+    /**
+     * Distance the panel is evaluated at: the distance it is placed in front of its anchor,
+     * plus how far the player's eye stands from that anchor.
+     *
+     * <p>While the panels follow the player the anchor sits exactly on the eye, so this is the
+     * configured placement distance and the falloff behaves as before. When a panel is anchored
+     * in the world the second term grows with every block the player walks away and shrinks
+     * again when they come back, which is what the distance falloff and the {@code maxDistance}
+     * cutoff have to react to. Measured from the player rather than from the camera so that the
+     * third person camera offset is not mistaken for a panel that is suddenly far away.</p>
+     */
+    private float cameraDistance(Minecraft mc, SpatialWindow window, float placed) {
+        if (mc.player == null) {
+            return placed;
+        }
+        double dx = window.anchorX() - mc.player.getX();
+        double dy = window.anchorY() - mc.player.getEyeY();
+        double dz = window.anchorZ() - mc.player.getZ();
+        double away = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        return Float.isFinite((float) away) ? placed + (float) away : placed;
+    }
 
     private QuadBasis place(Minecraft mc, SpatialWindow window) {
         MultiSpaceConfig cfg = MultiSpaceConfig.get();

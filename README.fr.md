@@ -110,11 +110,11 @@ contrôleur de visibilité lisse chaque changement, aucune valeur ne provoque de
 
 | Clé | Défaut | Rôle |
 | --- | ------ | ---- |
-| `panelDistance` | `1.6` | Distance par rapport à la caméra. |
+| `panelDistance` | `1.6` | Distance à laquelle le panneau est placé devant son ancrage (l'œil quand les panneaux suivent le joueur). |
 | `panelWidth` | `1.25` | Largeur du panneau en blocs à pleine échelle ; la hauteur suit le ratio de la fenêtre. |
 | `panelSideOffset`, `panelHeightOffset` | `0.0` | Translation de tout le layout. |
 | `panelYawOffset`, `panelPitchOffset` | `0.0` | Rotation de tout le layout. |
-| `panelsFollowPlayer` | `true` | `false` = les panneaux restent ancrés dans le monde là où ils se sont ouverts. |
+| `panelsFollowPlayer` | `true` | `false` = les panneaux restent ancrés dans le monde là où ils se sont ouverts ; le fondu de distance suit alors la distance parcourue par le joueur. |
 | `windowSpacingDegrees` | `18` | Espacement angulaire entre deux fenêtres de l'éventail. |
 | `backgroundPushBack` | `0.35` | Profondeur supplémentaire pour les fenêtres non focalisées. |
 | `resizeEnabled` | `true` | Glisser les bords pour redimensionner. |
@@ -131,7 +131,7 @@ contrôleur de visibilité lisse chaque changement, aucune valeur ne provoque de
 
 | Clé | Défaut | Rôle |
 | --- | ------ | ---- |
-| `maxDistance` | `6.0` | Au-delà, une fenêtre est invisible et inerte. |
+| `maxDistance` | `6.0` | Au-delà, une fenêtre est invisible et inerte — sauf celle que regarde le joueur : le focus l'emporte sur la distance. |
 | `focusScaleIntensity` | `0.75` | À quel point une fenêtre non focalisée rétrécit (`0` = pas du tout, `1` = jusqu'à `minScale`). |
 | `focusFadeIntensity` | `0.85` | À quel point elle devient transparente. |
 | `crosshairBoost` | `1.0` | Priorité supplémentaire à la fenêtre visée par le réticule. |
@@ -191,41 +191,58 @@ Une frame, trois points de capture — aucun écran n'est extrait deux fois :
 | `MultiSpaceConfig` | Config client persistante. |
 | `ScreenCompatibility` | Évaluation liste blanche / liste noire. |
 
-## Compilation
+## Compilation et tests
 
 **JDK 25** requis (`JAVA_HOME` doit y pointer).
 
 ```bash
-./gradlew build        # compile puis copie le JAR dans copy-jar-here/
-./gradlew runClient    # lance un client de développement
+./gradlew build              # compile puis copie le JAR dans copy-jar-here/
+./gradlew runClient          # lance un client de développement
+./gradlew test               # 24 tests JUnit : géométrie, visibilité, configuration
+./gradlew runClientGameTest  # 47 contrôles de bout en bout dans un client réel
 ```
 
 Le JAR livré est `copy-jar-here/multispaceui-mc<version-mc>-v<version-mod>.jar`.
 Recompiler la même version écrase son propre JAR et n'en touche jamais un autre.
 
+Le jeu-test pilote de vraies entrées (pointeur, boutons souris, molette, touches) dans un
+monde réel : il ouvre l'inventaire, vise un slot, clique dessus, clique hors de tous les
+panneaux, ouvre un coffre comme deuxième fenêtre, s'éloigne des deux panneaux et finit par
+assigner la touche de bascule. Chaque contrôle est journalisé `[gametest] PASS ...`
+(`FAIL ...` en cas d'échec), la session se termine par un unique `AssertionError` listant
+tous les échecs, et les captures d'écran vont dans
+`build/run/clientGameTest/screenshots/`.
+
 ## Matrice de tests
 
 « Le build passe » ne suffit pas : le mod doit être **jouable**, avec des interfaces 3D
-interactives.
+interactives. **Dernier passage : 47/47 contrôles de jeu-test et 24/24 tests unitaires, tous
+verts.**
 
-| # | Test | Statut |
-| - | ---- | ------ |
-| 1 | `gradlew build` réussit seul | ✅ OK |
-| 2 | JAR livré dans `copy-jar-here/` avec version MC + mod dans le nom | ✅ OK |
-| 3 | Le client démarre avec le mod, aucune erreur d'application Mixin | ✅ OK |
-| 4 | Le HUD s'affiche normalement avec le mod activé | ✅ OK |
-| 5 | L'écran de conteneur apparaît en panneau 3D, sans fond assombri résiduel | ✅ OK |
-| 6 | Contenu du panneau non miré / orientation UV correcte | ✅ OK (visuel) |
-| 7 | La hotbar vanilla reste dessinée quand une fenêtre est ouverte | ✅ OK |
-| 8 | Un clic dans un panneau atteint le bon slot (glisser-déposer d'objet) | ⏳ en attente |
-| 9 | Un clic hors panneau ne ferme jamais le conteneur | ⏳ en attente |
-| 10 | Défilement (molette) dans un panneau | ⏳ en attente |
-| 11 | Regarder une 2e fenêtre la focalise et la met à l'échelle | ⏳ en attente |
-| 12 | Deux fenêtres ouvertes simultanément, fenêtre de fond persistante | ⏳ en attente |
-| 13 | Le panneau rétrécit et s'estompe avec la distance, disparaît au-delà de `maxDistance` | ⏳ en attente |
-| 14 | La fenêtre focalisée n'est jamais masquée par la règle de distance | ⏳ en attente |
-| 15 | La touche de bascule désactive le mod et replie les fenêtres | ⏳ en attente |
-| 16 | Les modifications de config sont appliquées et persistantes au redémarrage | ⏳ en attente |
+| # | Test | Résultat | Preuve |
+| - | ---- | -------- | ------ |
+| 1 | `gradlew build` réussit seul | ✅ OK | `BUILD SUCCESSFUL` |
+| 2 | JAR livré dans `copy-jar-here/` avec version MC + mod dans le nom | ✅ OK | `multispaceui-mc26.3-v0.1.0.jar` |
+| 3 | Le client démarre avec le mod, aucune erreur d'application Mixin | ✅ OK | le jeu-test démarre et pilote un vrai client pendant toute la session |
+| 4 | Le HUD s'affiche normalement avec le mod activé | ✅ OK | capture `0000_multispaceui-01-inventory-window.png` |
+| 5 | L'écran de conteneur apparaît en panneau 3D, sans fond assombri résiduel | ✅ OK | `the panel is placed in view space`, `the panel content is extracted into its own texture` |
+| 6 | Contenu du panneau non miré / orientation UV correcte | ✅ OK | `the pointer maps onto the slot inside the panel (panel 16,150 / slot 16,150)` + capture |
+| 7 | La hotbar vanilla reste dessinée quand une fenêtre est ouverte | ✅ OK | capture `0000_...` (hotbar, vie et XP toujours dessinés) |
+| 8 | Un clic dans un panneau atteint le bon slot (glisser-déposer d'objet) | ✅ OK | `a click inside the panel is routed to the screen`, `clicking the slot picks the stack up` |
+| 9 | Un clic hors panneau ne ferme jamais le conteneur | ✅ OK | `a click far outside every panel is dropped`, `the very same container screen survives a click outside the panel`, `the click outside neither picked up nor dropped anything` |
+| 10 | Défilement (molette) dans un panneau | ✅ OK | `scroll inside the panel is routed to the screen`, `scroll far outside every panel is dropped as well` |
+| 11 | Regarder une 2e fenêtre la focalise et la met à l'échelle | ✅ OK | `the crosshair focuses the new window`, `the background window loses the focus`, `smaller than the focused one (0.35 < 1.0)` |
+| 12 | Deux fenêtres ouvertes simultanément, fenêtre de fond persistante | ✅ OK | `using the chest opens a second window`, `the background window is still visible`, capture `0003_multispaceui-04-two-windows.png` |
+| 13 | Le panneau rétrécit et s'estompe avec la distance, disparaît au-delà de `maxDistance` | ✅ OK | `past maxDistance is gone / fades out / shrinks to its minimum` (panneaux ancrés dans le monde, joueur éloigné de 14 blocs) |
+| 14 | La fenêtre focalisée n'est jamais masquée par la règle de distance | ✅ OK | `the window being looked at is never hidden by the distance rule` + test unitaire `focusedWindowIsNeverHiddenByTheDistanceRule` |
+| 15 | La touche de bascule désactive le mod et replie les fenêtres | ✅ OK | `the toggle keybind switches the mod off`, `switching the mod off folds every window` |
+| 16 | Les modifications de config sont appliquées et persistantes au redémarrage | ✅ OK | `a configuration edit is written to disk and read back` + 7 tests unitaires sur `MultiSpaceConfig` |
+
+Note sur le test n° 10 : `mouseScrolled` passe par le même prédicat de filtrage que
+`mouseClicked`, et le jeu-test vérifie les deux côtés (sur un panneau → l'écran reçoit le
+défilement, hors de tous les panneaux → jeté). Aucun écran de conteneur vanilla ne défile
+lui-même : seul le routage est observable, faute de widget défilant à observer de bout en
+bout.
 
 ## Compatibilité avec les futures versions
 

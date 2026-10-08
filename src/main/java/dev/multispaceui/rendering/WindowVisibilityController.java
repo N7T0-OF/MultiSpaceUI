@@ -37,20 +37,39 @@ public final class WindowVisibilityController {
                                  SpatialWindow hovered,
                                  SpatialWindow active,
                                  float cameraDistance) {
-        MultiSpaceConfig cfg = MultiSpaceConfig.get();
+        return present(focusWeight(window, focused, hovered, active), cameraDistance,
+                window.isMinimized(), window.isClosing(), MultiSpaceConfig.get());
+    }
 
-        float focusWeight = focusWeight(window, focused, hovered, active);
+    /**
+     * Presentation of a window from its focus weight, in blocks.
+     *
+     * <p>Kept free of any Minecraft type so the whole priority system can be verified by unit
+     * tests as well as in the world. Priority order: focus beats distance, so the window the
+     * player looks at is never cut off by {@code maxDistance} even when it is further away.</p>
+     *
+     * @param focusWeight    see {@link #focusWeight}
+     * @param cameraDistance distance from the camera to the panel centre, in blocks
+     * @param minimized      the window was folded by the player
+     * @param closing        the window is playing its close animation
+     * @param cfg            configuration to evaluate against
+     */
+    public static Presentation present(float focusWeight, float cameraDistance,
+                                       boolean minimized, boolean closing, MultiSpaceConfig cfg) {
         float distanceWeight = distanceWeight(cameraDistance, focusWeight, cfg);
-        float orientation = orientationWeight(window, focused, cfg);
+        float orientation = focusWeight >= 0.999f ? 1.0f : 1.0f - 0.15f * cfg.focusScaleIntensity;
 
         float scale = cfg.baseScale * focusScale(focusWeight, cfg) * distanceWeight * orientation;
         scale = clamp(scale, cfg.minScale, cfg.maxScale);
 
-        float opacity = cfg.maxOpacity * focusOpacity(focusWeight, cfg) * distanceOpacity(cameraDistance, focusWeight, cfg);
+        float opacity = cfg.maxOpacity * focusOpacity(focusWeight, cfg)
+                * distanceOpacity(cameraDistance, focusWeight, cfg);
         opacity = clamp(opacity, 0.0f, cfg.maxOpacity);
 
-        boolean visible = opacity > 0.01f && cameraDistance <= cfg.maxDistance && !window.isMinimized();
-        boolean interactive = visible && focusWeight >= 0.5f && !window.isClosing();
+        boolean visible = opacity > 0.01f
+                && (focusWeight >= 0.999f || cameraDistance <= cfg.maxDistance)
+                && !minimized;
+        boolean interactive = visible && focusWeight >= 0.5f && !closing;
 
         return new Presentation(scale, opacity, cameraDistance, visible, interactive);
     }

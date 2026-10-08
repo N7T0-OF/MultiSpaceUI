@@ -16,6 +16,9 @@
     ],
     "client": [
       "dev.multispaceui.client.MultiSpaceUIClient"
+    ],
+    "fabric-client-gametest": [
+      "dev.multispaceui.gametest.MultiSpaceGameTests"
     ]
   },
   "mixins": [

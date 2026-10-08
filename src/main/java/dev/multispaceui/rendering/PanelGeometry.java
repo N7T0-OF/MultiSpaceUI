@@ -21,6 +21,16 @@ import org.joml.Vector4f;
  */
 public final class PanelGeometry {
 
+    /**
+     * How far outside the panel a hit still counts as a hit.
+     *
+     * <p>A pixel sitting exactly on the edge of a panel comes back as {@code u = 1.0000001}
+     * once it travelled through the projection and back; rejecting that would silently drop
+     * the clicks made on the border of a window. The tolerance is far below one GUI unit, so
+     * a click that really is outside the panel is still refused.</p>
+     */
+    private static final float EDGE_TOLERANCE = 1.0E-4f;
+
     /** Orthonormal frame of a panel, in view space; used both for drawing and picking. */
     public record QuadBasis(Vector3f center, Vector3f right, Vector3f up, Vector3f normal,
                             float halfWidth, float halfHeight) {
@@ -227,7 +237,19 @@ public final class PanelGeometry {
         }
         near.div(near.w());
         far.div(far.w());
-        Vector3f direction = new Vector3f(far.x() - near.x(), far.y() - near.y(), far.z() - near.z());
+        // Minecraft renders with a reversed depth buffer: depending on the frame the 0.9
+        // sample may be *closer* to the eye than the 0.5 one. Both samples lie on the same
+        // line through the camera, so ordering them by their distance to the eye always
+        // yields a direction pointing away from it - a backwards ray would make every panel
+        // intersection return t < 0, i.e. no click would ever reach a window.
+        Vector3f start = new Vector3f(near.x(), near.y(), near.z());
+        Vector3f end = new Vector3f(far.x(), far.y(), far.z());
+        if (start.lengthSquared() > end.lengthSquared()) {
+            Vector3f swap = start;
+            start = end;
+            end = swap;
+        }
+        Vector3f direction = end.sub(start);
         if (direction.lengthSquared() < 1.0E-12f) {
             return null;
         }
@@ -268,7 +290,8 @@ public final class PanelGeometry {
         if (Float.isNaN(u) || Float.isNaN(v)) {
             return null;
         }
-        if (u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f) {
+        if (u < -EDGE_TOLERANCE || u > 1.0f + EDGE_TOLERANCE
+                || v < -EDGE_TOLERANCE || v > 1.0f + EDGE_TOLERANCE) {
             return null;
         }
         return new Vector3f(u, v, t);

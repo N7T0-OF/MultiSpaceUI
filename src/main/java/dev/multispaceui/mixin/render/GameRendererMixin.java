@@ -29,6 +29,9 @@ public class GameRendererMixin {
 
         try {
             Minecraft mc = Minecraft.getInstance();
+            // A cleanup asked for from the network thread still has to run on this one,
+            // even when there is no level left to render.
+            SpatialWindowRenderer.instance.applyPendingReset();
             if (mc.level == null) {
                 return;
             }

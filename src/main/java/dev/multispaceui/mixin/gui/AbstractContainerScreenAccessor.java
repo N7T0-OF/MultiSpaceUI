@@ -16,4 +16,11 @@ public interface AbstractContainerScreenAccessor {
 
     @Accessor("imageHeight")
     int multispaceui$imageHeight();
+
+    /** Top-left corner of the content, in the GUI units the screen was laid out for. */
+    @Accessor("leftPos")
+    int multispaceui$getLeftPos();
+
+    @Accessor("topPos")
+    int multispaceui$getTopPos();
 }
