@@ -1,0 +1,46 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "org.tastytrash.spatialGUI.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "mixins": [
+  ],
+  "client": [
+    "client.AbstractRecipeBookScreenMixin",
+    "client.EntityMixin",
+    "client.LocalPlayerMixin",
+    "client.MinecraftMixin",
+    "client.OptionsMixin",
+    "compat.DynamicCrosshairMixin",
+    "gui.DebugScreenOverlayMixin",
+    "gui.GuiMixin",
+    "gui.GuiRendererAccessor",
+    "gui.GuiRendererMixin",
+    "gui.HudMixin",
+    "gui.MouseHandlerAccessor",
+    "gui.MouseHandlerMixin",
+    "gui.MouseHandlerSwingMixin",
+    "gui.PauseScreenMixin",
+    "gui.ScreenInvoker",
+    "gui.ScreenMixin",
+    "gui.SubtitleOverlayMixin",
+    "gui.WindowMixin",
+    "input.InputConstantsMixin",
+    "render.AvatarRendererMixin",
+    "render.CameraMixin",
+    "render.EntityRenderDispatcherMixin",
+    "render.GameRendererAccessor",
+    "render.GameRendererInvoker",
+    "render.GameRendererMixin",
+    "render.HandRendererMixin",
+    "render.LevelRendererMixin",
+    "render.OwoBlurMixin",
+    "render.RenderTargetMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "overwrites": {
+    "requireAnnotations": true
+  }
+}

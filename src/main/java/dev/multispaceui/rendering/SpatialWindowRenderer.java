@@ -27,8 +27,12 @@ import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.StagedVertexBuffer;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
+import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
+import org.tastytrash.spatialGUI.client.SpatialGUIClient;
+import org.tastytrash.spatialGUI.render.SpatialGUIRenderer;
+import org.tastytrash.spatialGUI.util.RenderUtil;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -152,10 +156,45 @@ public final class SpatialWindowRenderer {
         return bases.get(window);
     }
 
-    /** True once the screen of this window has been extracted into its own texture. */
+    /**
+     * Where the cursor lands inside this window's panel, in the GUI units of its screen.
+     *
+     * @return {@code {x, y}}, or {@code null} when the cursor is not over the panel - which
+     *         is exactly the distinction a dropped click needs, so this never clamps the
+     *         answer onto the border of the texture the way the base's mapper does
+     */
+    public double[] cursorOn(SpatialWindow window) {
+        QuadBasis basis = bases.get(window);
+        if (basis == null || !hasFrame) {
+            return null;
+        }
+        Vector3f ray = PanelGeometry.viewRay(projectionMatrix, targeting.cursorX(),
+                targeting.cursorY(), frameWidth, frameHeight);
+        // Bounded on purpose: a cursor anywhere in the world is off the panel, and off the
+        // panel is what lets a click be dropped instead of being routed to the screen.
+        Vector3f hit = PanelGeometry.intersect(ray, basis);
+        if (hit == null) {
+            return null;
+        }
+        return new double[]{hit.x() * window.innerWidth(), (1.0f - hit.y()) * window.innerHeight()};
+    }
+
+    /**
+     * True once the screen of this window has been extracted into its own texture.
+     *
+     * <p>While the Spatial GUI base draws the active window itself, that texture is its
+     * target and not ours, so the two are accepted indifferently.</p>
+     */
     public boolean hasCaptureContent(SpatialWindow window) {
         WindowCapture capture = captures.get(window);
-        return capture != null && capture.hasTarget();
+        if (capture != null && capture.hasTarget()) {
+            return true;
+        }
+        if (window == WindowManager.get().active() && baseRendersActive()) {
+            SpatialGUIRenderer renderer = SpatialGUIClient.renderer();
+            return renderer != null && renderer.getTargetManager().getInventoryTarget() != null;
+        }
+        return false;
     }
 
     public Matrix4fc viewRotation() {
@@ -227,6 +266,10 @@ public final class SpatialWindowRenderer {
             ensureSize(mc, window);
             followAnchor(mc, window, cfg);
             float focusWeight = WindowVisibilityController.focusWeight(window, focused, hovered, manager.active());
+            // `panelDistance` stays the distance at which the falloff starts (a knob of our
+            // own config, in blocks), not the distance the base places panels at - the two
+            // are independent, so a player who moves the Spatial GUI panel closer does not
+            // silently change how fast the background windows fade.
             float placed = cfg.panelDistance + window.distanceOffset()
                     + (focusWeight >= 0.999f ? 0.0f : cfg.backgroundPushBack);
             // The falloff reacts to where the panel really is: the same as `placed` while the
@@ -245,6 +288,11 @@ public final class SpatialWindowRenderer {
         }
 
         // 3. Placement: builds the view space pose and refreshes the picking frames.
+        //    The window the player is talking to is placed as well, so picking and focus
+        //    switching can see every panel - but the Spatial GUI base draws that one, from
+        //    its own isolated texture, so it only leaves the list of panels to draw here.
+        SpatialWindow active = manager.active();
+        boolean baseOwnsActive = active != null && baseRendersActive();
         List<SpatialWindow> drawable = new ArrayList<>();
         for (SpatialWindow window : manager.windows()) {
             if (!window.isVisible() || window.isMinimized() || window.isClosing()) {
@@ -252,10 +300,12 @@ public final class SpatialWindowRenderer {
                 poses.remove(window);
                 continue;
             }
-            QuadBasis basis = place(mc, window);
+            QuadBasis basis = place(mc, window, window == active);
             if (basis != null) {
                 bases.put(window, basis);
-                drawable.add(window);
+                if (window != active || !baseOwnsActive) {
+                    drawable.add(window);
+                }
             } else {
                 bases.remove(window);
                 poses.remove(window);
@@ -313,30 +363,95 @@ public final class SpatialWindowRenderer {
         return Float.isFinite((float) away) ? placed + (float) away : placed;
     }
 
-    private QuadBasis place(Minecraft mc, SpatialWindow window) {
+    /**
+     * True while the Spatial GUI base is drawing the active window itself: it has hooked
+     * that screen, it is installed as the Minecraft screen, and its own target is the one
+     * showing its content. MultiSpaceUI then only draws the background windows, so a panel
+     * is never rendered twice.
+     *
+     * <p>When the base cannot take it (its config is off, the screen is folded away, the
+     * screen is not one the base hooks) the active window stays in our own list and is
+     * drawn from our capture like any other one.</p>
+     */
+    public static boolean baseRendersActive() {
+        if (!SpatialGUIClient.isEnabled()) {
+            return false;
+        }
+        SpatialGUIRenderer renderer = SpatialGUIClient.renderer();
+        return renderer != null && renderer.shouldCapture();
+    }
+
+    /**
+     * Places one panel in view space.
+     *
+     * <p>The base transform - distance, side / height offsets, yaw offset and scale - comes
+     * straight from {@link RenderUtil#getScreenTransformConfig} and
+     * {@link RenderUtil#applyScreenTransform}, the very same calls Spatial GUI uses for its
+     * own panel, so the window the player talks to sits exactly where the base draws it.
+     * The extra ingredients are ours: the fan angle that spreads the other windows around
+     * it, the push back that separates them, and the focus / distance scale.</p>
+     *
+     * <p>Result space is <b>view space</b>: the captured view rotation is applied first, so
+     * the camera sits at the origin and -Z looks forward, which is the space the picking
+     * rays are built in.</p>
+     */
+    private QuadBasis place(Minecraft mc, SpatialWindow window, boolean isActive) {
         MultiSpaceConfig cfg = MultiSpaceConfig.get();
         int activeIndex = indexOfActive();
-        float arcDegrees = (window.layoutIndex() - activeIndex) * cfg.windowSpacingDegrees;
+        float arcDegrees = isActive ? 0.0f : (window.layoutIndex() - activeIndex) * cfg.windowSpacingDegrees;
+
+        // The panel the Spatial GUI base is drawing right now defines its own geometry:
+        // its FOV reading, its open animation and its camera-relative anchor are all taken
+        // from the pass that actually renders it. Borrowing that basis means the window the
+        // player talks to is picked exactly where it is displayed - and a background panel
+        // is sized by the very same scale, so the fan never mixes two different panel sizes.
+        QuadBasis drawn = isActive && baseRendersActive() ? baseBasisInViewSpace() : null;
+        if (drawn != null) {
+            // The base draws it, so no pose of ours is needed for it.
+            poses.remove(window);
+            return drawn;
+        }
+
+        boolean firstPerson = SpatialGUIClient.getEffectiveFirstPersonMode();
+        RenderUtil.ScreenTransformConfig base = RenderUtil.getScreenTransformConfig(firstPerson);
+        float extraDistance = isActive ? 0.0f : cfg.backgroundPushBack;
+        RenderUtil.ScreenTransformConfig transform = extraDistance == 0.0f ? base
+                : new RenderUtil.ScreenTransformConfig(base.distance() + extraDistance,
+                        base.sideOffset(), base.heightOffset(),
+                        base.yawOffset(), base.pitchOffset(), base.scale());
+
+        float yawRad = (float) Math.toRadians(mc.player.getYRot());
+        float pitchRad = firstPerson ? (float) Math.toRadians(clampPitch(mc.gameRenderer.mainCamera().xRot())) : 0.0f;
+        float lookX = (float) (-Math.sin(yawRad) * Math.cos(pitchRad));
+        float lookY = (float) (-Math.sin(pitchRad));
+        float lookZ = (float) (Math.cos(yawRad) * Math.cos(pitchRad));
+        float panelScale = baseQuadScale();
+        if (panelScale <= 0.0f) {
+            panelScale = transform.scale();
+        }
 
         poseStack.pushPose();
         try {
-            PanelGeometry.placePanel(poseStack, viewRotation,
-                    cameraX, cameraY, cameraZ,
-                    window.anchorX(), window.anchorY(), window.anchorZ(),
-                    window.anchorYaw() + cfg.panelYawOffset,
-                    window.anchorPitch() + cfg.panelPitchOffset,
-                    arcDegrees,
-                    window.distance(),
-                    cfg.panelSideOffset,
-                    cfg.panelHeightOffset,
-                    window.scale());
+            // View space first, then the world anchor of this window (zero while the panels
+            // follow the player), then the fan rotation, then the base placement itself.
+            poseStack.mulPose(viewRotation);
+            poseStack.translate(window.anchorX() - cameraX, window.anchorY() - cameraY,
+                    window.anchorZ() - cameraZ);
+            if (arcDegrees != 0.0f) {
+                // PoseStack takes a matrix on 26.3, exactly like the base's own transform.
+                poseStack.mulPose(new Quaternionf().rotateY((float) Math.toRadians(arcDegrees)).get(new Matrix4f()));
+            }
+            RenderUtil.applyScreenTransform(poseStack, firstPerson, yawRad, pitchRad,
+                    transform, lookX, lookY, lookZ);
+            // The scale comes from the base when it can be read: same panel, same size.
+            float visibilityScale = isActive ? 1.0f : window.scale();
+            float totalScale = panelScale * visibilityScale;
+            poseStack.scale(totalScale, totalScale, totalScale);
 
             Matrix4f pose = new Matrix4f(poseStack.last().pose());
             poses.put(window, pose);
-            float aspect = window.aspect();
-            float halfWidth = cfg.panelWidth * 0.5f;
-            float halfHeight = (cfg.panelWidth / Math.max(0.05f, aspect)) * 0.5f;
-            return PanelGeometry.basisOf(pose, halfWidth * window.scale(), halfHeight * window.scale());
+            float aspect = Math.max(0.05f, window.aspect());
+            return PanelGeometry.basisOf(pose, aspect * 0.5f * totalScale, 0.5f * totalScale);
         } catch (Throwable t) {
             MultiSpaceUI.LOGGER.error("Could not place a spatial panel", t);
             poses.remove(window);
@@ -344,6 +459,42 @@ public final class SpatialWindowRenderer {
         } finally {
             poseStack.popPose();
         }
+    }
+
+    /**
+     * Quad the Spatial GUI base is drawing its active panel with, rotated into view space,
+     * or {@code null} when the base is not drawing anything.
+     *
+     * <p>The base keeps that basis in world space (a camera-relative frame with no view
+     * rotation), which is exactly how its ray based mouse mapping reads it. Rotating it with
+     * the view rotation of this frame puts it in the space our own picking rays live in, so
+     * a click and the drawn panel can no longer drift apart.</p>
+     */
+    private QuadBasis baseBasisInViewSpace() {
+        SpatialGUIRenderer renderer = SpatialGUIClient.renderer();
+        if (renderer == null || !renderer.shouldCapture()) {
+            return null;
+        }
+        var base = renderer.getInventoryRenderer().getQuadBasis();
+        if (base == null || base.halfWidth() <= 0.0f || base.halfHeight() <= 0.0f) {
+            return null;
+        }
+        Matrix4f toView = new Matrix4f(viewRotation);
+        Vector3f center = new Vector3f(base.centerOffset()).mulPosition(toView);
+        Vector3f right = new Vector3f(base.right()).mulDirection(toView);
+        Vector3f up = new Vector3f(base.up()).mulDirection(toView);
+        Vector3f normal = new Vector3f(base.normal()).mulDirection(toView);
+        return new QuadBasis(center, right, up, normal, base.halfWidth(), base.halfHeight());
+    }
+
+    /** Size multiplier the base currently draws with, or a negative value when unknown. */
+    private float baseQuadScale() {
+        SpatialGUIRenderer renderer = SpatialGUIClient.renderer();
+        if (renderer == null || !renderer.shouldCapture()) {
+            return -1.0f;
+        }
+        var base = renderer.getInventoryRenderer().getQuadBasis();
+        return base == null ? -1.0f : base.halfHeight() * 2.0f;
     }
 
     /** Keeps the anchor where the player is when the panels are meant to follow them. */
@@ -394,39 +545,27 @@ public final class SpatialWindowRenderer {
     }
 
     /**
-     * Lays a window out at the size its content actually needs: container screens are
-     * measured through their own image size, everything else gets the configured default.
+     * Measures a window at the size its screen actually laid itself out for.
+     *
+     * <p>Every window holds a full-screen sized texture, exactly like the target the
+     * Spatial GUI base extracts its own screen into: a background panel is then made
+     * smaller by the focus / distance presentation instead of being re-laid out for a
+     * smaller box. Reading the screen's own width and height - rather than the game
+     * window's - keeps the texture and the widgets inside it in agreement even when the
+     * base overrides the GUI scale for a hooked screen.</p>
      */
     public static void ensureSize(Minecraft mc, SpatialWindow window) {
         if (window.innerWidth() > 0) {
             return;
         }
         Screen screen = window.screen();
-        MultiSpaceConfig cfg = MultiSpaceConfig.get();
-        int width = cfg.defaultWindowWidth;
-        int height = cfg.defaultWindowHeight;
-        if (screen instanceof AbstractContainerScreen<?> container) {
-            var accessor = (dev.multispaceui.mixin.gui.AbstractContainerScreenAccessor) container;
-            width = accessor.multispaceui$imageWidth();
-            height = accessor.multispaceui$imageHeight();
+        int width = screen == null ? 0 : screen.width;
+        int height = screen == null ? 0 : screen.height;
+        if (width <= 0 || height <= 0) {
+            width = Math.max(64, mc.getWindow().getGuiScaledWidth());
+            height = Math.max(48, mc.getWindow().getGuiScaledHeight());
         }
-        int fullWidth = Math.max(64, mc.getWindow().getGuiScaledWidth());
-        int fullHeight = Math.max(48, mc.getWindow().getGuiScaledHeight());
-        window.resize(Math.min(width, fullWidth), Math.min(height, fullHeight));
-        window.markLayoutDirty();
-        applyLayout(window);
-    }
-
-    /** Re-initialises the screen for the current window size, when that size changed. */
-    public static void applyLayout(SpatialWindow window) {
-        if (!window.consumeLayoutDirty()) {
-            return;
-        }
-        try {
-            window.screen().init(window.innerWidth(), window.innerHeight());
-        } catch (Throwable t) {
-            MultiSpaceUI.LOGGER.warn("Could not re-layout {}", window.screenClass(), t);
-        }
+        window.resize(width, height);
     }
 
     // ----------------------------------------------------------------------------------
@@ -477,8 +616,10 @@ public final class SpatialWindowRenderer {
                 StagedVertexBuffer.Draw draw = PANEL_BUFFER.appendDraw(format,
                         PANEL_PIPELINE.getPrimitiveTopology(), ProjectionType.PERSPECTIVE.vertexSorting());
                 VertexConsumer consumer = PANEL_BUFFER.getVertexBuilder(draw);
-                float halfWidth = cfg.panelWidth * 0.5f;
-                float halfHeight = (cfg.panelWidth / Math.max(0.05f, window.aspect())) * 0.5f;
+                // The pose already carries the scale: this is the unit quad the base draws,
+                // sized so that its aspect matches the texture it is filled with.
+                float halfWidth = Math.max(0.05f, window.aspect()) * 0.5f;
+                float halfHeight = 0.5f;
                 PanelGeometry.emitQuad(consumer, pose, halfWidth, halfHeight, 0x00FFFFFF | (alpha << 24));
                 draws.add(draw);
                 drawn.add(window);

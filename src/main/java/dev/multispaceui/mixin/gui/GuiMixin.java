@@ -2,12 +2,10 @@ package dev.multispaceui.mixin.gui;
 
 import dev.multispaceui.MultiSpaceUI;
 import dev.multispaceui.core.WindowManager;
-import dev.multispaceui.interaction.SpatialInput;
 import dev.multispaceui.rendering.SpatialWindowRenderer;
 import dev.multispaceui.window.SpatialWindow;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Gui;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -20,17 +18,19 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * Keeps vanilla and the spatial windows from fighting over the active screen.
  *
- * <p>Three things happen here:</p>
+ * <p>Two things happen here:</p>
  * <ul>
- *   <li>a windowed screen is <b>not</b> extracted into the HUD anymore - its own
- *       off-screen capture does it, so the panel and the HUD never double draw
- *       the same widgets,</li>
  *   <li>{@code Screen.removed()} is skipped when the screen is being swapped for
  *       another window: the old screen (and its menu) must stay alive as a
  *       background window,</li>
- *   <li>after every screen change the window list is reconciled and the new
- *       active window is re-laid out at its own panel size.</li>
+ *   <li>after every screen change the window list is reconciled and the window the
+ *       game just switched to is measured at its own panel size.</li>
  * </ul>
+ *
+ * <p>Extracting the active screen into an off-screen texture instead of the HUD is the
+ * Spatial GUI base's own {@code GuiMixin}: it swaps the extractor argument for its
+ * isolated one, so there is nothing to do here - and doing it as well would only make
+ * the screen disappear from both.</p>
  */
 @Mixin(Gui.class)
 public class GuiMixin {
@@ -78,28 +78,10 @@ public class GuiMixin {
                 SpatialWindow window = manager.findByScreen(current);
                 if (window != null) {
                     SpatialWindowRenderer.ensureSize(mc, window);
-                    SpatialWindowRenderer.applyLayout(window);
                 }
             }
         } catch (Throwable t) {
             MultiSpaceUI.LOGGER.error("Could not reconcile spatial windows", t);
         }
-    }
-
-    @Redirect(
-            method = "extractRenderState",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lnet/minecraft/client/gui/screens/Screen;extractRenderStateWithTooltipAndSubtitles(Lnet/minecraft/client/gui/GuiGraphicsExtractor;IIF)V"
-            )
-    )
-    private void multispaceui$extractWindowedScreenElsewhere(
-            Screen windowed, GuiGraphicsExtractor extractor, int mouseX, int mouseY, float partialTick
-    ) {
-        if (SpatialInput.isManaged(windowed)) {
-            // Extracted by its own window capture instead: the HUD must not draw it too.
-            return;
-        }
-        windowed.extractRenderStateWithTooltipAndSubtitles(extractor, mouseX, mouseY, partialTick);
     }
 }

@@ -5,12 +5,19 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import org.tastytrash.spatialGUI.client.SpatialGUIClient;
 
 /**
  * Decides whether a {@link Screen} can be turned into a spatial window.
  *
  * <p>A screen that cannot be rendered or used correctly is left in vanilla 2D instead of
  * being forced into a panel that would break it.</p>
+ *
+ * <p>The final answer is the conjunction of two filters: this mod's own white / black
+ * lists, and the Spatial GUI base's ({@code SpatialGUIClient.shouldHookScreen}). The base
+ * decides what it is willing to render as a panel - it would keep everything else flat in
+ * the HUD - so a screen accepted here but rejected there would end up drawn twice, once in
+ * the HUD and once as a window.</p>
  */
 public final class ScreenCompatibility {
 
@@ -53,20 +60,22 @@ public final class ScreenCompatibility {
         if (cfg.includedScreens.contains(id)) {
             return true;
         }
+        boolean allowed;
         if (screen instanceof CreativeModeInventoryScreen || screen instanceof InventoryScreen) {
-            return cfg.spatialInventory;
+            allowed = cfg.spatialInventory;
+        } else if (screen instanceof AbstractContainerScreen<?>) {
+            allowed = cfg.spatialContainers;
+        } else if (!screen.isInGameUi()) {
+            allowed = false;
+        } else {
+            allowed = cfg.spatialOtherScreens;
         }
-        if (screen instanceof AbstractContainerScreen<?>) {
-            return cfg.spatialContainers;
-        }
-        if (!screen.isInGameUi()) {
-            return false;
-        }
-        return cfg.spatialOtherScreens;
+        return allowed && SpatialGUIClient.shouldHookScreen(screen);
     }
 
     /** Records an unknown screen so the settings screen can list every screen seen in game. */
     public static void remember(Screen screen) {
-        // Reserved for the settings UI: kept deliberately side-effect free for now.
+        // The base already records every screen it is asked about (its `seenScreens`
+        // list, filled by shouldHookScreen), which is what the settings screen reads.
     }
 }

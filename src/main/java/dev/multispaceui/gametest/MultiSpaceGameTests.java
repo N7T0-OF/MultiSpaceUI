@@ -200,18 +200,32 @@ public final class MultiSpaceGameTests implements FabricClientGameTest {
             return;
         }
 
-        double[] pixel = pixelForGui(ctx, inventory, slot.x(), slot.y());
+        // The base glides its camera with the pointer, so the panel slides a little after
+        // every pointer move. Follow the slot until it stops moving under the pointer,
+        // which is the fixed point a player's hand settles on.
+        double[] pixel = settleCursorOn(ctx, inventory, slot.x(), slot.y());
         check(pixel != null, "the slot can be pointed at with the pointer");
         if (pixel == null) {
             return;
         }
-        moveCursorTo(ctx, pixel[0], pixel[1]);
 
-        double guiX = read(ctx, mc -> SpatialInput.mapX(0.0));
-        double guiY = read(ctx, mc -> SpatialInput.mapY(0.0));
-        check(Math.abs(guiX - slot.x()) <= 4.0 && Math.abs(guiY - slot.y()) <= 4.0,
+        SlotProbe probe = probeSlot(ctx, inventory, slot.x(), slot.y());
+        // The panel keeps gliding a little while the pointer rests on it, so the pointer is
+        // chased onto the slot again until a single frame reads both as one.
+        for (int attempt = 0; attempt < 3 && probe != null
+                && (Math.abs(probe.mappedX() - slot.x()) > 4.0
+                || Math.abs(probe.mappedY() - slot.y()) > 4.0); attempt++) {
+            moveCursorTo(ctx, probe.foundX(), probe.foundY());
+            probe = probeSlot(ctx, inventory, slot.x(), slot.y());
+        }
+        double guiX = probe == null ? Double.NaN : probe.mappedX();
+        double guiY = probe == null ? Double.NaN : probe.mappedY();
+        check(probe != null
+                        && Math.abs(guiX - slot.x()) <= 4.0
+                        && Math.abs(guiY - slot.y()) <= 4.0,
                 "the pointer maps onto the slot inside the panel (panel "
-                        + (int) guiX + "," + (int) guiY + " / slot " + (int) slot.x() + "," + (int) slot.y() + ")");
+                        + (int) guiX + "," + (int) guiY + " / slot " + (int) slot.x() + "," + (int) slot.y()
+                        + (probe == null ? "" : " / cursor " + (int) probe.cursorX() + "," + (int) probe.cursorY()) + ")");
         check(!read(ctx, mc -> SpatialInput.shouldDropClick(mc.gui.screen())),
                 "a click inside the panel is routed to the screen instead of being dropped");
         // Scrolling shares that routing decision (MouseHandlerMixin routes mouseScrolled the
@@ -221,6 +235,8 @@ public final class MultiSpaceGameTests implements FabricClientGameTest {
         check(!read(ctx, mc -> SpatialInput.shouldDropClick(mc.gui.screen())),
                 "scroll inside the panel is routed to the screen");
 
+        // The panel glides on: point at the slot one last time so the click lands on it.
+        settleCursorOn(ctx, inventory, slot.x(), slot.y());
         ctx.getInput().pressMouse(LEFT_BUTTON);
         ctx.waitTicks(5);
         check(read(ctx, mc -> mc.gui.screen() instanceof AbstractContainerScreen<?> screen
@@ -466,100 +482,123 @@ public final class MultiSpaceGameTests implements FabricClientGameTest {
     // Pointer helpers
     // ----------------------------------------------------------------------------------
 
-    /**
-     * Framebuffer pixel whose panel hit maps to {@code (targetX, targetY)} in GUI units.
-     *
-     * <p>The panel is a plane in view space, so the mapping is searched inside the projected
-     * quad: coarse pass over the quad, then one refinement pass. Using the very same
-     * geometry the input path uses keeps the search exact by construction.</p>
-     */
     private double[] pixelForGui(ClientGameTestContext ctx, SpatialWindow window,
                                  double targetX, double targetY) {
-        double[] result = read(ctx, mc -> {
-            SpatialWindowRenderer renderer = SpatialWindowRenderer.instance;
-            QuadBasis basis = renderer.basisOf(window);
-            Matrix4fc projection = renderer.projectionMatrix();
-            int width = renderer.frameWidth();
-            int height = renderer.frameHeight();
-            if (basis == null || projection == null || width <= 0 || height <= 0) {
-                MultiSpaceUI.LOGGER.info("[gametest] pixel search: no frame (basis={} projection={} {}x{})",
-                        basis != null, projection != null, width, height);
-                return null;
-            }
-            float[] corners = PanelGeometry.projectCorners(basis, projection, width, height);
-            if (corners == null) {
-                MultiSpaceUI.LOGGER.info("[gametest] pixel search: projectCorners=null ({}x{}) centre={}",
-                        width, height, basis.center());
-                return null;
-            }
-            double minX = width;
-            double maxX = 0;
-            double minY = height;
-            double maxY = 0;
-            for (int i = 0; i < 4; i++) {
-                minX = Math.min(minX, corners[i * 2]);
-                maxX = Math.max(maxX, corners[i * 2]);
-                minY = Math.min(minY, corners[i * 2 + 1]);
-                maxY = Math.max(maxY, corners[i * 2 + 1]);
-            }
-            double rawMinX = minX;
-            double rawMaxX = maxX;
-            double rawMinY = minY;
-            double rawMaxY = maxY;
-            minX = Math.max(0, Math.min(width - 1, minX));
-            maxX = Math.max(0, Math.min(width - 1, maxX));
-            minY = Math.max(0, Math.min(height - 1, minY));
-            maxY = Math.max(0, Math.min(height - 1, maxY));
-            if (maxX <= minX || maxY <= minY) {
-                MultiSpaceUI.LOGGER.info("[gametest] pixel search: degenerate box {}x{} raw=({},{})-({},{})",
-                        maxX - minX, maxY - minY, rawMinX, rawMinY, rawMaxX, rawMaxY);
-                return null;
-            }
+        return read(ctx, mc -> pixelForGuiNow(window, targetX, targetY));
+    }
 
-            int tested = 0;
-            int hits = 0;
-            double step = Math.max(4.0, Math.max(maxX - minX, maxY - minY) / 40.0);
-            double bestX = -1;
-            double bestY = -1;
-            double bestError = Double.MAX_VALUE;
-            for (int pass = 0; pass < 2; pass++) {
-                double fromX = pass == 0 ? minX : bestX - step * 2.0;
-                double toX = pass == 0 ? maxX : bestX + step * 2.0;
-                double fromY = pass == 0 ? minY : bestY - step * 2.0;
-                double toY = pass == 0 ? maxY : bestY + step * 2.0;
-                if (pass == 1) {
-                    bestError = Double.MAX_VALUE;
-                }
-                for (double y = Math.max(0, fromY); y <= Math.min(height - 1, toY); y += step) {
-                    for (double x = Math.max(0, fromX); x <= Math.min(width - 1, toX); x += step) {
-                        tested++;
-                        double[] gui = guiAt(basis, projection, width, height, window, x, y);
-                        if (gui == null) {
-                            continue;
-                        }
-                        hits++;
-                        double error = Math.abs(gui[0] - targetX) + Math.abs(gui[1] - targetY);
-                        if (error < bestError) {
-                            bestError = error;
-                            bestX = x;
-                            bestY = y;
-                        }
+    /**
+     * Same search, but evaluated in the caller's own frame: it returns the pixel that shows
+     * {@code (targetX, targetY)} <i>right now</i>, next to whatever else that frame reads.
+     *
+     * <p>The Spatial GUI base glides its camera with the pointer, so a panel never quite
+     * stops moving while the pointer travels. Reading the search and the input mapping in
+     * one frame is what keeps the two on the same geometry.</p>
+     */
+    private static double[] pixelForGuiNow(SpatialWindow window, double targetX, double targetY) {
+        SpatialWindowRenderer renderer = SpatialWindowRenderer.instance;
+        QuadBasis basis = renderer.basisOf(window);
+        Matrix4fc projection = renderer.projectionMatrix();
+        int width = renderer.frameWidth();
+        int height = renderer.frameHeight();
+        if (basis == null || projection == null || width <= 0 || height <= 0) {
+            return null;
+        }
+        float[] corners = PanelGeometry.projectCorners(basis, projection, width, height);
+        if (corners == null) {
+            return null;
+        }
+        double minX = width;
+        double maxX = 0;
+        double minY = height;
+        double maxY = 0;
+        for (int i = 0; i < 4; i++) {
+            minX = Math.min(minX, corners[i * 2]);
+            maxX = Math.max(maxX, corners[i * 2]);
+            minY = Math.min(minY, corners[i * 2 + 1]);
+            maxY = Math.max(maxY, corners[i * 2 + 1]);
+        }
+        minX = Math.max(0, Math.min(width - 1, minX));
+        maxX = Math.max(0, Math.min(width - 1, maxX));
+        minY = Math.max(0, Math.min(height - 1, minY));
+        maxY = Math.max(0, Math.min(height - 1, maxY));
+        if (maxX <= minX || maxY <= minY) {
+            return null;
+        }
+
+        double step = Math.max(4.0, Math.max(maxX - minX, maxY - minY) / 40.0);
+        double bestX = -1;
+        double bestY = -1;
+        double bestError = Double.MAX_VALUE;
+        for (int pass = 0; pass < 2; pass++) {
+            double fromX = pass == 0 ? minX : bestX - step * 2.0;
+            double toX = pass == 0 ? maxX : bestX + step * 2.0;
+            double fromY = pass == 0 ? minY : bestY - step * 2.0;
+            double toY = pass == 0 ? maxY : bestY + step * 2.0;
+            if (pass == 1) {
+                bestError = Double.MAX_VALUE;
+            }
+            for (double y = Math.max(0, fromY); y <= Math.min(height - 1, toY); y += step) {
+                for (double x = Math.max(0, fromX); x <= Math.min(width - 1, toX); x += step) {
+                    double[] gui = guiAt(basis, projection, width, height, window, x, y);
+                    if (gui == null) {
+                        continue;
+                    }
+                    double error = Math.abs(gui[0] - targetX) + Math.abs(gui[1] - targetY);
+                    if (error < bestError) {
+                        bestError = error;
+                        bestX = x;
+                        bestY = y;
                     }
                 }
-                if (bestX < 0) {
-                    MultiSpaceUI.LOGGER.info("[gametest] pixel search: no hit (target={}x{} box=({},{})-({},{}) "
-                                    + "step={} tested={} hits={} size={}x{})",
-                            targetX, targetY, rawMinX, rawMinY, rawMaxX, rawMaxY, step, tested, hits,
-                            window.innerWidth(), window.innerHeight());
-                    return null;
-                }
-                step /= 8.0;
             }
-            MultiSpaceUI.LOGGER.info("[gametest] pixel search: target=({},{}) -> ({},{}) err={} tested={} hits={}",
-                    targetX, targetY, bestX, bestY, bestError, tested, hits);
-            return new double[]{bestX, bestY};
+            if (bestX < 0) {
+                return null;
+            }
+            step /= 8.0;
+        }
+        if (bestError > 8.0) {
+            // Nothing on the panel maps close enough to the asked point: better no pixel at
+            // all than a pixel that would make the following clicks land somewhere else.
+            return null;
+        }
+        return new double[]{bestX, bestY};
+    }
+
+    /** Where the pointer sits after pointing at a GUI point, once the panel stopped sliding. */
+    private double[] settleCursorOn(ClientGameTestContext ctx, SpatialWindow window,
+                                    double guiX, double guiY) {
+        double[] pixel = pixelForGui(ctx, window, guiX, guiY);
+        for (int attempt = 0; attempt < 6 && pixel != null; attempt++) {
+            moveCursorTo(ctx, pixel[0], pixel[1]);
+            double[] again = pixelForGui(ctx, window, guiX, guiY);
+            if (again == null) {
+                break;
+            }
+            if (Math.abs(again[0] - pixel[0]) < 0.5 && Math.abs(again[1] - pixel[1]) < 0.5) {
+                return pixel;
+            }
+            // The pointer moved the camera, so the panel slid away: follow it.
+            pixel = again;
+        }
+        return pixel;
+    }
+
+    private record SlotProbe(double foundX, double foundY, double mappedX, double mappedY,
+                             double cursorX, double cursorY) {}
+
+    /** In one frame: the pixel showing a GUI point, and where the pointer maps to. */
+    private SlotProbe probeSlot(ClientGameTestContext ctx, SpatialWindow window,
+                                double guiX, double guiY) {
+        return read(ctx, mc -> {
+            double[] found = pixelForGuiNow(window, guiX, guiY);
+            if (found == null) {
+                return null;
+            }
+            return new SlotProbe(found[0], found[1], SpatialInput.mapX(0.0), SpatialInput.mapY(0.0),
+                    SpatialWindowRenderer.instance.targeting().cursorX(),
+                    SpatialWindowRenderer.instance.targeting().cursorY());
         });
-        return result;
     }
 
     /** GUI coordinates of the panel content under the framebuffer pixel (px, py). */

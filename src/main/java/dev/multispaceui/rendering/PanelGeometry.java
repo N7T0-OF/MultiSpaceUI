@@ -1,10 +1,8 @@
 package dev.multispaceui.rendering;
 
-import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
-import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import org.joml.Vector3fc;
 import org.joml.Vector4f;
@@ -44,64 +42,12 @@ public final class PanelGeometry {
     // ----------------------------------------------------------------------------------
 
     /**
-     * Builds the view space transform of one panel.
+     * Extracts the panel frame out of a view space transform: the frame the panel was drawn
+     * with, in the space the picking rays live in.
      *
-     * @param viewRotation world -&gt; view rotation of this frame
-     * @param cameraX      camera position, world space
-     * @param anchorX      anchor of the window, world space
-     * @param anchorYaw    yaw, degrees, the panel was opened with
-     * @param anchorPitch  pitch, degrees, the panel was opened with
-     * @param arcDegrees   position of the window in the fan layout, degrees
-     * @param distance     depth of the panel from the anchor, blocks
-     * @param sideOffset   sideways shift along the anchor right vector, blocks
-     * @param heightOffset vertical shift along the world up vector, blocks
-     * @param scale        size multiplier coming from the visibility controller
+     * @param halfWidth  half width of the panel in world units
+     * @param halfHeight half height of the panel in world units
      */
-    public static void placePanel(PoseStack pose,
-                                  Matrix4fc viewRotation,
-                                  double cameraX, double cameraY, double cameraZ,
-                                  double anchorX, double anchorY, double anchorZ,
-                                  float anchorYaw, float anchorPitch,
-                                  float arcDegrees,
-                                  float distance,
-                                  float sideOffset,
-                                  float heightOffset,
-                                  float scale) {
-        float yaw = (float) Math.toRadians(anchorYaw);
-        float pitch = (float) Math.toRadians(anchorPitch);
-        float arc = (float) Math.toRadians(arcDegrees);
-
-        // Facing direction of the anchor, tilted by the fan arc so panels spread sideways.
-        float lookX = (float) (-Math.sin(yaw) * Math.cos(pitch));
-        float lookY = (float) (-Math.sin(pitch));
-        float lookZ = (float) (Math.cos(yaw) * Math.cos(pitch));
-        float sideX = (float) (Math.cos(yaw));
-        float sideZ = (float) (Math.sin(yaw));
-
-        float cosArc = (float) Math.cos(arc);
-        float sinArc = (float) Math.sin(arc);
-        float dirX = lookX * cosArc + sideX * sinArc;
-        float dirY = lookY * cosArc;
-        float dirZ = lookZ * cosArc + sideZ * sinArc;
-
-        double panelX = anchorX + dirX * distance + sideX * sideOffset;
-        double panelY = anchorY + dirY * distance + heightOffset;
-        double panelZ = anchorZ + dirZ * distance + sideZ * sideOffset;
-
-        pose.pushPose();
-        pose.mulPose(viewRotation);
-        pose.translate((float) (panelX - cameraX), (float) (panelY - cameraY), (float) (panelZ - cameraZ));
-        // The panel normal points back at the anchor origin, tilted by the fan arc.
-        // (PoseStack only accepts matrices in this version: the quaternion is converted
-        //  exactly the way a rotation matrix would be built from it.)
-        Quaternionf tilt = new Quaternionf()
-                .rotateY((float) Math.toRadians(180.0f - anchorYaw + arcDegrees))
-                .rotateX(-pitch);
-        pose.mulPose(new Matrix4f().rotation(tilt));
-        pose.scale(scale, scale, scale);
-    }
-
-    /** Extracts the panel frame from the final transform of {@link #placePanel}. */
     public static QuadBasis basisOf(Matrix4fc pose, float halfWidth, float halfHeight) {
         Vector3f center = pose.transformPosition(new Vector3f());
         Vector3f right = pose.transformDirection(1.0f, 0.0f, 0.0f, new Vector3f());
@@ -262,6 +208,32 @@ public final class PanelGeometry {
      * @return {u, v, t} with u/v in [0,1], or null when the ray misses the panel
      */
     public static Vector3f intersect(Vector3f ray, QuadBasis basis) {
+        Vector3f hit = intersectUnclamped(ray, basis);
+        if (hit == null) {
+            return null;
+        }
+        float u = hit.x();
+        float v = hit.y();
+        if (u < -EDGE_TOLERANCE || u > 1.0f + EDGE_TOLERANCE
+                || v < -EDGE_TOLERANCE || v > 1.0f + EDGE_TOLERANCE) {
+            return null;
+        }
+        return hit;
+    }
+
+    /**
+     * Same intersection, but the edge test is left out: the returned u / v say where the ray
+     * lands on the plane of the panel <b>even when it lands outside of it</b> (u &lt; 0,
+     * u &gt; 1, ...).
+     *
+     * <p>Anything that has to tell "the cursor is over this panel" from "the cursor is
+     * somewhere in the world" needs that distinction: a clamped answer always claims the
+     * cursor is on the border, and a click made in the world would then be routed to the
+     * screen instead of being dropped.</p>
+     *
+     * @return {u, v, t}, or null when the ray does not hit the plane in front of the camera
+     */
+    public static Vector3f intersectUnclamped(Vector3f ray, QuadBasis basis) {
         if (ray == null || basis == null) {
             return null;
         }
@@ -288,10 +260,6 @@ public final class PanelGeometry {
         float u = (localX / basis.halfWidth() + 1.0f) * 0.5f;
         float v = (localY / basis.halfHeight() + 1.0f) * 0.5f;
         if (Float.isNaN(u) || Float.isNaN(v)) {
-            return null;
-        }
-        if (u < -EDGE_TOLERANCE || u > 1.0f + EDGE_TOLERANCE
-                || v < -EDGE_TOLERANCE || v > 1.0f + EDGE_TOLERANCE) {
             return null;
         }
         return new Vector3f(u, v, t);

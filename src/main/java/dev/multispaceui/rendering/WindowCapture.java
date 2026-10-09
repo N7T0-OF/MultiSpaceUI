@@ -142,13 +142,13 @@ public final class WindowCapture implements AutoCloseable {
     /** Opens a fresh extraction for {@code window} and returns the graphics to extract with. */
     GuiGraphicsExtractor beginExtract(Minecraft mc, SpatialWindow window, int mouseX, int mouseY) {
         renderState.reset();
-        MultiSpaceLayout.push(window);
         stale = false;
         return new GuiGraphicsExtractor(mc, renderState, mouseX, mouseY);
     }
 
     void endExtract() {
-        MultiSpaceLayout.pop();
+        // Nothing to unwind: a window is extracted at the size its screen laid itself out
+        // for, so no global GUI size override has to be pushed around it anymore.
     }
 
     /** True when the window content still has to be extracted this frame. */
@@ -237,7 +237,6 @@ public final class WindowCapture implements AutoCloseable {
 
     @Override
     public void close() {
-        MultiSpaceLayout.popAll();
         if (guiRenderer != null) {
             TARGETS.remove(guiRenderer);
             if (borrowedPipRenderers) {

@@ -1,0 +1,30 @@
+__________ FIXES _________________
+================================
+-------- HIGH PRIORITY ---------------
+
+Toasts rendering on the GUI
+
+-------- MID PRIORITY ---------------
+
+Hand bob gets reset when entering and leaving the GUI
+
+Issue #17 & #18
+
+-------- LOW PRIORITY ---------------
+
+The EMI compat causes:
+[17:24:52] [main/WARN]: Error loading class: dev/emi/emi/screen/EmiScreenManager (java.lang.ClassNotFoundException: dev/emi/emi/screen/EmiScreenManager)
+to be printed in consoles, it would be better if it didn't, may need to use IMixinConfigPlugin instead of doing @Pseudo
+
+Minecraft's water effects not applying properly when in the menu with velocity underwater (is this solvable?) (affects all versions, could be a minecraft issue)
+
+__________ SUGGESTIONS/FEATURES _________________
+================================================
+
+#58 Screen closing animation
+
+Add forge 1.20.1
+
+Parallax magnitude config
+
+Special transition case for third person front

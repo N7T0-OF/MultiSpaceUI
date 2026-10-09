@@ -1,3 +1,5 @@
+import org.gradle.api.attributes.java.TargetJvmVersion
+
 plugins {
     id 'net.fabricmc.fabric-loom' version "${loom_version}"
     id 'java'
@@ -19,6 +21,9 @@ java {
 
 repositories {
     mavenCentral()
+    // Spatial GUI's configuration screen (cloth-config) and the Mod Menu entry.
+    maven { name = 'Cloth Config'; url = 'https://maven.shedaniel.me/' }
+    maven { name = 'Terraformers'; url = 'https://maven.terraformersmc.com/' }
 }
 
 dependencies {
@@ -28,6 +33,9 @@ dependencies {
     minecraft 'com.mojang:minecraft:' + project.minecraft_version
     implementation 'net.fabricmc:fabric-loader:' + project.loader_version
     implementation 'net.fabricmc.fabric-api:fabric-api:' + project.fabric_version
+    // Spatial GUI base: configuration screen (hard dependency) + Mod Menu (optional).
+    implementation 'me.shedaniel.cloth:cloth-config-fabric:' + project.cloth_config_version
+    implementation 'com.terraformersmc:modmenu:' + project.modmenu_version
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
@@ -56,6 +64,25 @@ test {
     }
 }
 
+// Cloth Config and Mod Menu publish their variants with an explicit "built for
+// Java 25" marker. Gradle matches that marker against this project's *target*
+// bytecode level (21, see below) and would refuse them outright, so the class
+// paths - the test ones included, since the unit tests load the very same
+// configuration classes - declare the JVM they will actually run on. A library
+// built for an older JVM still stays compatible, only newer ones are unlocked.
+configurations.named('compileClasspath') {
+    attributes { attribute(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 25) }
+}
+configurations.named('runtimeClasspath') {
+    attributes { attribute(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 25) }
+}
+configurations.named('testCompileClasspath') {
+    attributes { attribute(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 25) }
+}
+configurations.named('testRuntimeClasspath') {
+    attributes { attribute(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 25) }
+}
+
 // End-to-end validation: `gradlew runClientGameTest` boots a client with
 // -Dfabric.client.gametest in its own run directory (build/run/clientGameTest) and runs the
 // entrypoint declared under "fabric-client-gametest" in fabric.mod.json.
@@ -75,6 +102,8 @@ jar {
     from("LICENSE") {
         rename { "${it}_${project.base.archivesName.get()}" }
     }
+    // The Spatial GUI core is MIT: its licence travels with every copy of the jar.
+    from("LICENSE.spatial-gui.txt")
     archiveFileName = "${project.base.archivesName.get()}-mc${project.minecraft_version}-v${project.version}.jar"
 }
 

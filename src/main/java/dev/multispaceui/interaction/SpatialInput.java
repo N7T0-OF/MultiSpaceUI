@@ -7,31 +7,38 @@ import dev.multispaceui.rendering.SpatialWindowRenderer;
 import dev.multispaceui.window.SpatialWindow;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
-import org.joml.Vector3f;
+import org.tastytrash.spatialGUI.client.SpatialGUIClient;
+import org.tastytrash.spatialGUI.render.SpatialGUIRenderer;
+import org.tastytrash.spatialGUI.util.MouseHandlerUtil;
 
 /**
- * Translates vanilla mouse input into panel space.
+ * Focus and click routing for the window layer.
  *
- * <p>Vanilla asks {@code MouseHandler} for the cursor position in GUI units and
- * hands it to the active screen. This class answers that question with the
- * cursor position <b>inside the panel of the active window</b>, so a screen
- * laid out for a small window receives coordinates that match its widgets:</p>
+ * <p>The cursor-to-panel mapping itself belongs to the Spatial GUI base: its
+ * {@code MouseHandlerMixin} rewrites {@code getScaledXPos/getScaledYPos} so vanilla hands
+ * the active screen coordinates <b>inside its own panel</b>. This class therefore only
+ * answers the two questions the base does not know about, because the base only ever sees
+ * one window:</p>
  *
  * <ul>
- *   <li>cursor over the active panel → its GUI coordinates,</li>
- *   <li>cursor off the panel → a value far outside every widget, and the click
- *       itself is dropped (see {@link #shouldDropClick}), so a container can
- *       never interpret it as "clicked outside" and close itself,</li>
- *   <li>cursor over <i>another</i> window → that window is focused first, then
- *       the same mapping applies to it, so one click focuses and interacts,</li>
- *   <li>no placement data yet (first frames, mod half disabled) → vanilla
- *       coordinates, so input degrades to vanilla instead of breaking.</li>
+ *   <li><b>where does the cursor land?</b> - {@link #mapX}/{@link #mapY} recompute the
+ *       very mapping the base applies, so tests and callers see exactly what the screen
+ *       receives (and a miss reports {@link #OFF_PANEL}, far outside every widget),</li>
+ *   <li><b>may this click go through?</b> - {@link #shouldDropClick} drops a click or a
+ *       scroll that misses every panel, so a container can never interpret it as "clicked
+ *       outside the slot area" and close itself,</li>
+ *   <li><b>which window owns the input?</b> - {@link #onButton} focuses the window the
+ *       cursor is over before the click is dispatched, and re-runs the base's mapping so
+ *       that the very same click already lands on the window that just became active.</li>
  * </ul>
+ *
+ * <p>When the mapping data is missing (first frames, no window installed as the screen,
+ * mod switched off) everything degrades to vanilla input instead of breaking.</p>
  */
 public final class SpatialInput {
 
-    /** Coordinate reported when the cursor is not over the panel. */
-    private static final double OFF_PANEL = -10000.0;
+    /** Coordinate reported when the cursor is not over the active panel. */
+    public static final double OFF_PANEL = -10000.0;
 
     private SpatialInput() {
     }
@@ -40,39 +47,46 @@ public final class SpatialInput {
     // Coordinate mapping
     // ----------------------------------------------------------------------------------
 
+    /**
+     * X coordinate the active screen receives for this frame, in its own GUI units.
+     *
+     * @param vanilla value vanilla would have answered, kept when there is no window
+     */
     public static double mapX(double vanilla) {
-        SpatialWindow active = activeWindow();
-        if (active == null) {
-            return vanilla;
+        double[] gui = activePanelPosition();
+        if (gui == null) {
+            return activeWindow() == null ? vanilla : OFF_PANEL;
         }
-        Vector3f hit = hitOf(active);
-        return hit == null ? OFF_PANEL : hit.x() * active.innerWidth();
+        return gui[0];
     }
 
+    /** Y coordinate the active screen receives for this frame, in its own GUI units. */
     public static double mapY(double vanilla) {
-        SpatialWindow active = activeWindow();
-        if (active == null) {
-            return vanilla;
+        double[] gui = activePanelPosition();
+        if (gui == null) {
+            return activeWindow() == null ? vanilla : OFF_PANEL;
         }
-        Vector3f hit = hitOf(active);
-        return hit == null ? OFF_PANEL : (1.0f - hit.y()) * active.innerHeight();
+        return gui[1];
     }
 
-    /** Normalized hit of the cursor on {@code window}, or null when it misses. */
-    private static Vector3f hitOf(SpatialWindow window) {
-        WindowTargeting targeting = SpatialWindowRenderer.instance.targeting();
-        if (!targeting.hasCursor() || !targeting.hasPlacement()) {
+    /**
+     * Cursor position inside the panel of the active window, in that screen's GUI units,
+     * or {@code null} when the cursor is not over the panel.
+     *
+     * <p>Measured with the placement the renderer actually drew, so hover, clicks and the
+     * content of the texture can never disagree by a pixel.</p>
+     */
+    private static double[] activePanelPosition() {
+        SpatialWindow active = activeWindow();
+        if (active == null) {
             return null;
         }
-        Vector3f hit = targeting.hitOf(window);
-        if (hit == null) {
+        try {
+            return SpatialWindowRenderer.instance.cursorOn(active);
+        } catch (Throwable t) {
+            MultiSpaceUI.LOGGER.debug("Could not map the cursor onto the panel", t);
             return null;
         }
-        // Behind the panel or outside it: the cursor is not on this window.
-        return hit.z() >= 0.0f && hit.x() >= -0.02f && hit.x() <= 1.02f
-                && hit.y() >= -0.02f && hit.y() <= 1.02f
-                ? hit
-                : null;
     }
 
     /**
@@ -95,7 +109,6 @@ public final class SpatialInput {
         if (installed == null || installed != active.screen()) {
             return null;
         }
-        // Without placement data the panel cannot be hit: fall back to vanilla input.
         if (!SpatialWindowRenderer.instance.targeting().hasPlacement()) {
             return null;
         }
@@ -109,18 +122,20 @@ public final class SpatialInput {
     /**
      * True when a click (or scroll) aimed at {@code screen} must be dropped
      * because the cursor is not over that screen's panel.
+     *
+     * <p>Without this guard a click landing in the world would reach the container screen
+     * as a click in an empty part of its slot area, which vanilla answers by closing it.</p>
      */
     public static boolean shouldDropClick(Screen screen) {
         SpatialWindow active = activeWindow();
         if (active == null || screen == null || active.screen() != screen) {
             return false;
         }
-        MultiSpaceConfig cfg = MultiSpaceConfig.get();
-        if (cfg.closeOnClickOutside) {
+        if (MultiSpaceConfig.get().closeOnClickOutside) {
             // The user explicitly wants "click outside to close" to work.
             return false;
         }
-        return hitOf(active) == null;
+        return activePanelPosition() == null;
     }
 
     /**
@@ -134,7 +149,10 @@ public final class SpatialInput {
      */
     public static final int LEFT_BUTTON = 1;
 
-    /** Called at the head of every mouse button event: focus the window that was hit. */
+    /**
+     * Called at the head of every mouse button event: focus the window that was hit, so the
+     * click it triggered is delivered to it instead of to the window that had the focus.
+     */
     public static void onButton(int button, int action) {
         if (action != 1 || button != LEFT_BUTTON || !MultiSpaceUI.isEnabled()) {
             return;
@@ -154,8 +172,29 @@ public final class SpatialInput {
                 return;
             }
             manager.activate(pointed);
+            refreshBaseMapping();
         } catch (Throwable t) {
             MultiSpaceUI.LOGGER.debug("Could not focus the clicked window", t);
+        }
+    }
+
+    /**
+     * Re-runs the base's cursor mapping right after the active window changed.
+     *
+     * <p>{@code setScreen} re-hooked the new screen, so its quad basis and its mapping are
+     * rebuilt here: without this the click that caused the swap would be delivered with the
+     * coordinates of the window that just lost the focus.</p>
+     */
+    private static void refreshBaseMapping() {
+        SpatialGUIRenderer renderer = SpatialGUIRendererHolder.renderer();
+        if (renderer == null || !renderer.shouldCapture()) {
+            return;
+        }
+        try {
+            renderer.getInventoryRenderer().updateQuadBasis();
+            renderer.updateMousePosition(MouseHandlerUtil.getSourceX(), MouseHandlerUtil.getSourceY());
+        } catch (Throwable t) {
+            MultiSpaceUI.LOGGER.debug("Could not refresh the panel mapping", t);
         }
     }
 
@@ -165,5 +204,12 @@ public final class SpatialInput {
             return false;
         }
         return WindowManager.get().findByScreen(screen) != null;
+    }
+
+    /** Small indirection so the base renderer can be missing without an import cycle. */
+    private static final class SpatialGUIRendererHolder {
+        private static SpatialGUIRenderer renderer() {
+            return SpatialGUIClient.renderer();
+        }
     }
 }

@@ -3,32 +3,43 @@
   "id": "multispaceui",
   "version": "${version}",
   "name": "MultiSpaceUI",
-  "description": "Floating spatial windows for Minecraft: container screens become 3D panels in the world. The panel you look at stays sharp and large, the others shrink and fade with distance.",
+  "description": "Spatial 3D windows for Minecraft, built on the Spatial GUI rendering core: container screens become panels in the world. The panel you look at stays large and readable, the others shrink, fade and disappear with distance.",
   "authors": [
-    "MultiSpaceUI contributors"
+    "MultiSpaceUI contributors",
+    "Spatial GUI (tastytrash)"
   ],
+  "contact": {
+    "sources": "https://github.com/N7T0-OF/MultiSpaceUI"
+  },
   "license": "MIT",
   "icon": "assets/multispaceui/icon.png",
-  "environment": "*",
+  "environment": "client",
   "entrypoints": {
     "main": [
+      "org.tastytrash.spatialGUI.SpatialGUI",
       "dev.multispaceui.MultiSpaceUI"
     ],
     "client": [
+      "org.tastytrash.spatialGUI.client.SpatialGUIClient",
       "dev.multispaceui.client.MultiSpaceUIClient"
+    ],
+    "modmenu": [
+      "org.tastytrash.spatialGUI.client.SpatialGUIModMenu"
     ],
     "fabric-client-gametest": [
       "dev.multispaceui.gametest.MultiSpaceGameTests"
     ]
   },
   "mixins": [
+    "spatial-gui.mixins.json",
     "multispaceui.mixins.json"
   ],
   "depends": {
     "fabricloader": ">=0.19.3",
     "minecraft": "~26.3",
     "java": ">=25",
-    "fabric-api": "*"
+    "fabric-api": "*",
+    "cloth-config": ">=26.3.158"
   },
   "suggests": {
     "modmenu": "*"

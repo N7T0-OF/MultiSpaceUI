@@ -9,6 +9,7 @@ import net.minecraft.client.Minecraft;
 import org.joml.Matrix4fc;
 import org.joml.Vector3f;
 import org.joml.Vector3fc;
+import org.tastytrash.spatialGUI.util.MouseHandlerUtil;
 
 import java.util.List;
 import java.util.Map;
@@ -86,7 +87,16 @@ public final class WindowTargeting {
         inputRay.set(hovered != null ? cursorRay : centerRay);
     }
 
-    /** Cursor position, in framebuffer pixels, converted from the raw window position. */
+    /**
+     * Cursor position, in framebuffer pixels.
+     *
+     * <p>Read from the base's {@code MouseHandlerUtil} rather than from
+     * {@code MouseHandler.xpos}: the base rewrites that field with the position of the
+     * cursor <i>inside the panel</i>, so reading it here would build a ray from panel
+     * coordinates and no window could ever be hit again. {@code getSourceX} already
+     * answers with the centre of the screen when the crosshair is what points at the
+     * panels.</p>
+     */
     private void readCursor(Minecraft mc) {
         var window = mc.getWindow();
         double screenW = window.getScreenWidth();
@@ -95,8 +105,8 @@ public final class WindowTargeting {
             hasCursor = false;
             return;
         }
-        double x = mc.mouseHandler.xpos();
-        double y = mc.mouseHandler.ypos();
+        double x = MouseHandlerUtil.getSourceX();
+        double y = MouseHandlerUtil.getSourceY();
         cursorX = x * window.getWidth() / screenW;
         cursorY = y * window.getHeight() / screenH;
         hasCursor = !Double.isNaN(cursorX) && !Double.isNaN(cursorY);
@@ -105,10 +115,12 @@ public final class WindowTargeting {
     /** Nearest window in the direction of {@code ray}, or null.
      *
      * <p>Several panels of the fan overlap, so a single ray often hits more than one of them.
-     * The window the player is really looking at is the one whose centre the ray points at
-     * most directly. Comparing depths instead would be self-defeating: only the focused window
-     * is kept at the front, so it would stay in front for ever and shadow the window that just
-     * became active. Depth only breaks a perfect tie.</p>
+     * Windows are stacked by distance here because they are <i>drawn</i> that way: the farthest
+     * panel goes first and the nearest is painted last, so at any overlapping pixel the nearest
+     * one is the panel the player actually sees. Focus never changes depth - only the active
+     * window loses the {@code backgroundPushBack} - so a window can not lock itself in front by
+     * being focused. Alignment only breaks a depth tie, which is what keeps a nearly coplanar
+     * fan pointing at the window the crosshair is aimed at.</p>
      */
     private SpatialWindow pick(List<SpatialWindow> windows, Map<SpatialWindow, QuadBasis> bases, Vector3f ray) {
         float rayLength = ray.length();
@@ -136,8 +148,8 @@ public final class WindowTargeting {
                     / (rayLength * centerLength);
             float depth = PanelGeometry.viewDepth(basis);
             if (best == null
-                    || alignment > bestAlignment + 1.0E-5f
-                    || (alignment >= bestAlignment - 1.0E-5f && depth < bestDepth)) {
+                    || depth < bestDepth - 1.0E-5f
+                    || (depth <= bestDepth + 1.0E-5f && alignment > bestAlignment)) {
                 best = window;
                 bestAlignment = alignment;
                 bestDepth = depth;

@@ -31,11 +31,10 @@ class MultiSpaceConfigTest {
         assertEquals(MultiSpaceConfig.Perspective.FIRST_PERSON, cfg.perspective);
 
         assertEquals(1.6f, cfg.panelDistance, 1.0E-4f, "panelDistance");
-        assertEquals(1.25f, cfg.panelWidth, 1.0E-4f, "panelWidth");
-        assertEquals(320, cfg.defaultWindowWidth, "defaultWindowWidth");
-        assertEquals(240, cfg.defaultWindowHeight, "defaultWindowHeight");
         assertEquals(18.0f, cfg.windowSpacingDegrees, 1.0E-4f, "windowSpacingDegrees");
         assertEquals(0.35f, cfg.backgroundPushBack, 1.0E-4f, "backgroundPushBack");
+        assertTrue(cfg.panelsFollowPlayer,
+                "windows follow the player by default; the Spatial GUI base owns the active panel placement");
 
         assertEquals(1.0f, cfg.baseScale, 1.0E-4f, "baseScale");
         assertEquals(0.35f, cfg.minScale, 1.0E-4f, "minScale");
@@ -45,7 +44,6 @@ class MultiSpaceConfigTest {
         assertEquals(9.0f, cfg.transitionSpeed, 1.0E-4f, "transitionSpeed");
 
         assertTrue(cfg.crosshairTargeting, "crosshairTargeting");
-        assertTrue(cfg.strictClickRouting, "strictClickRouting");
         assertFalse(cfg.closeOnClickOutside,
                 "a click outside a panel must never close the container by default");
         assertTrue(cfg.spatialContainers, "spatialContainers");
@@ -77,11 +75,6 @@ class MultiSpaceConfigTest {
         cfg.backgroundPushBack = 50.0f;
         cfg.transitionSpeed = -1.0f;
         cfg.renderScalePercent = 1;
-        cfg.defaultWindowWidth = 1;
-        cfg.defaultWindowHeight = 100_000;
-        cfg.dragSensitivity = 100.0f;
-        cfg.worldBlurStrength = 7.0f;
-        cfg.taskbarOpacity = 9.0f;
         cfg.normalise();
 
         assertEquals(0.3f, cfg.panelDistance, 1.0E-4f, "a panel cannot sit inside the camera");
@@ -90,11 +83,6 @@ class MultiSpaceConfigTest {
         assertEquals(8.0f, cfg.backgroundPushBack, 1.0E-4f, "backgroundPushBack is capped");
         assertEquals(0.0f, cfg.transitionSpeed, 1.0E-4f, "no negative interpolation speed");
         assertEquals(25, cfg.renderScalePercent, "the off-screen buffer keeps a usable resolution");
-        assertEquals(96, cfg.defaultWindowWidth, "a window is at least as wide as a slot row");
-        assertEquals(1200, cfg.defaultWindowHeight, "a window cannot be taller than the screen");
-        assertEquals(5.0f, cfg.dragSensitivity, 1.0E-4f, "dragSensitivity is capped");
-        assertEquals(1.0f, cfg.worldBlurStrength, 1.0E-4f, "a blur strength is a 0..1 factor");
-        assertEquals(1.0f, cfg.taskbarOpacity, 1.0E-4f, "an opacity is a 0..1 factor");
 
         cfg.baseScale = 0.0f;
         cfg.maxDistance = -3.0f;
@@ -155,12 +143,10 @@ class MultiSpaceConfigTest {
         MultiSpaceConfig cfg = new MultiSpaceConfig();
         cfg.focusScaleIntensity = -1.0f;
         cfg.focusFadeIntensity = 3.0f;
-        cfg.crosshairBoost = 9.0f;
         cfg.normalise();
 
         assertEquals(0.0f, cfg.focusScaleIntensity, 1.0E-4f);
         assertEquals(1.0f, cfg.focusFadeIntensity, 1.0E-4f);
-        assertEquals(1.0f, cfg.crosshairBoost, 1.0E-4f);
     }
 
     // --- screen black and white lists -----------------------------------------------
@@ -189,9 +175,7 @@ class MultiSpaceConfigTest {
     private static void assertSameValues(MultiSpaceConfig expected, MultiSpaceConfig actual) {
         assertEquals(expected.perspective, actual.perspective, "perspective");
         assertEquals(expected.panelDistance, actual.panelDistance, 1.0E-4f, "panelDistance");
-        assertEquals(expected.panelWidth, actual.panelWidth, 1.0E-4f, "panelWidth");
-        assertEquals(expected.defaultWindowWidth, actual.defaultWindowWidth, "defaultWindowWidth");
-        assertEquals(expected.defaultWindowHeight, actual.defaultWindowHeight, "defaultWindowHeight");
+        assertEquals(expected.panelsFollowPlayer, actual.panelsFollowPlayer, "panelsFollowPlayer");
         assertEquals(expected.windowSpacingDegrees, actual.windowSpacingDegrees, 1.0E-4f, "windowSpacingDegrees");
         assertEquals(expected.backgroundPushBack, actual.backgroundPushBack, 1.0E-4f, "backgroundPushBack");
         assertEquals(expected.baseScale, actual.baseScale, 1.0E-4f, "baseScale");
@@ -202,12 +186,7 @@ class MultiSpaceConfigTest {
         assertEquals(expected.maxDistance, actual.maxDistance, 1.0E-4f, "maxDistance");
         assertEquals(expected.focusScaleIntensity, actual.focusScaleIntensity, 1.0E-4f, "focusScaleIntensity");
         assertEquals(expected.focusFadeIntensity, actual.focusFadeIntensity, 1.0E-4f, "focusFadeIntensity");
-        assertEquals(expected.crosshairBoost, actual.crosshairBoost, 1.0E-4f, "crosshairBoost");
         assertEquals(expected.transitionSpeed, actual.transitionSpeed, 1.0E-4f, "transitionSpeed");
         assertEquals(expected.renderScalePercent, actual.renderScalePercent, "renderScalePercent");
-        assertEquals(expected.taskbarScale, actual.taskbarScale, 1.0E-4f, "taskbarScale");
-        assertEquals(expected.taskbarOpacity, actual.taskbarOpacity, 1.0E-4f, "taskbarOpacity");
-        assertEquals(expected.dragSensitivity, actual.dragSensitivity, 1.0E-4f, "dragSensitivity");
-        assertEquals(expected.worldBlurStrength, actual.worldBlurStrength, 1.0E-4f, "worldBlurStrength");
     }
 }

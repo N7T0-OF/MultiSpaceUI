@@ -10,51 +10,25 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Routes mouse input to the panel the cursor is actually over.
+ * Focus and click routing of the window layer.
  *
- * <p>Vanilla converts the raw cursor position with
- * {@code getScaledXPos/getScaledYPos} and feeds the result to the active screen.
- * While a spatial window is active those two methods answer with the cursor
- * position <b>inside that window's panel</b> (or a value far outside every
- * widget when the cursor misses the panel), so hover, clicks and drags act on
- * the panel content instead of on a monitor-shaped screen.</p>
+ * <p>Mapping the cursor into the panel belongs to the Spatial GUI base: its own mixin
+ * rewrites {@code getScaledXPos/getScaledYPos} with the position inside the panel of the
+ * window it hooked, and this mod only ever opens windows for screens that mixin would
+ * hook too (see {@code ScreenCompatibility}). Two injects therefore stay here, both about
+ * deciding <i>which</i> window input belongs to:</p>
  *
- * <p>A left click first focuses the window it hits, then the click is delivered
- * to that window. A click that misses every panel is dropped: it must never be
- * interpreted by a container screen as "clicked outside", which would silently
- * close the inventory.</p>
+ * <ul>
+ *   <li>a left click first focuses the window it hits, then is delivered to that window,</li>
+ *   <li>a click or a scroll that misses every panel is dropped: it must never be
+ *       interpreted by a container screen as "clicked outside", which would silently
+ *       close the inventory.</li>
+ * </ul>
  */
 @Mixin(MouseHandler.class)
 public class MouseHandlerMixin {
-
-    @Inject(
-            method = "getScaledXPos(Lcom/mojang/blaze3d/platform/Window;)D",
-            at = @At("RETURN"),
-            cancellable = true
-    )
-    private void multispaceui$mapX(com.mojang.blaze3d.platform.Window window,
-                                   CallbackInfoReturnable<Double> cir) {
-        double mapped = SpatialInput.mapX(cir.getReturnValueD());
-        if (mapped != cir.getReturnValueD()) {
-            cir.setReturnValue(mapped);
-        }
-    }
-
-    @Inject(
-            method = "getScaledYPos(Lcom/mojang/blaze3d/platform/Window;)D",
-            at = @At("RETURN"),
-            cancellable = true
-    )
-    private void multispaceui$mapY(com.mojang.blaze3d.platform.Window window,
-                                   CallbackInfoReturnable<Double> cir) {
-        double mapped = SpatialInput.mapY(cir.getReturnValueD());
-        if (mapped != cir.getReturnValueD()) {
-            cir.setReturnValue(mapped);
-        }
-    }
 
     /** Focuses the window under the cursor before the click is dispatched. */
     @Inject(method = "onButton", at = @At("HEAD"))
